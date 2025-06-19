@@ -1,0 +1,404 @@
+name: 📦 Build Magisk Module
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'box/**'
+      - 'webroot/**'
+      - 'customize.sh'
+      - 'module.prop'
+      - '*.sh'
+  pull_request:
+    branches: [ main, master ]
+    types: [ closed ]
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: '创建新版本发布'
+        required: false
+        default: false
+        type: boolean
+      version_type:
+        description: '版本类型'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build-module:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true) || github.event_name == 'push'
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: ⚙️ 设置构建环境
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y zip unzip jq curl
+        
+        # 安装GitHub CLI (用于创建发布)
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt-get update
+        sudo apt-get install -y gh
+
+    - name: 🔢 计算版本号
+      id: version
+      run: |
+        current_version=$(grep -o 'version=v[0-9.]*' module.prop | cut -d'=' -f2 | sed 's/v//')
+        current_code=$(grep -o 'versionCode=[0-9]*' module.prop | cut -d'=' -f2)
+        
+        echo "current_version=$current_version" >> $GITHUB_OUTPUT
+        echo "current_code=$current_code" >> $GITHUB_OUTPUT
+        
+        # 根据触发类型计算新版本
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.create_release }}" = "true" ]; then
+          # 手动创建发布版本
+          version_type="${{ github.event.inputs.version_type }}"
+          
+          IFS='.' read -ra VERSION_PARTS <<< "$current_version"
+          major=${VERSION_PARTS[0]}
+          minor=${VERSION_PARTS[1]:-0}
+          patch=${VERSION_PARTS[2]:-0}
+          
+          case $version_type in
+            major)
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            minor)
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            patch)
+              patch=$((patch + 1))
+              ;;
+          esac
+          
+          new_version="$major.$minor.$patch"
+          new_code=$(date +"%Y%m%d")
+          is_release=true
+        else
+          # 开发版本，使用当前版本 + 构建号
+          build_number=$(printf "%04d" ${{ github.run_number }})
+          new_version="$current_version-dev.$build_number"
+          new_code=$(date +"%Y%m%d%H")
+          is_release=false
+        fi
+        
+        echo "new_version=$new_version" >> $GITHUB_OUTPUT
+        echo "new_code=$new_code" >> $GITHUB_OUTPUT
+        echo "is_release=$is_release" >> $GITHUB_OUTPUT
+        
+        echo "📦 当前版本: v$current_version ($current_code)"
+        echo "📦 新版本: v$new_version ($new_code)"
+        echo "📦 是否发布: $is_release"
+
+    - name: 📝 更新模块信息
+      run: |
+        new_version="${{ steps.version.outputs.new_version }}"
+        new_code="${{ steps.version.outputs.new_code }}"
+        
+        # 更新module.prop
+        sed -i "s/version=v.*/version=v$new_version/" module.prop
+        sed -i "s/versionCode=.*/versionCode=$new_code/" module.prop
+        
+        # 更新描述中的时间戳
+        current_time=$(date +"%Y-%m-%d %H:%M UTC")
+        sed -i "s/description=.*/description=sing-box tunnel proxy for Android - Built on $current_time/" module.prop
+        
+        # 更新update.json
+        if [ "${{ steps.version.outputs.is_release }}" = "true" ]; then
+          # 发布版本
+          zip_url="https://github.com/${{ github.repository }}/releases/download/v$new_version/box_for_root-v$new_version.zip"
+        else
+          # 开发版本
+          zip_url="https://github.com/${{ github.repository }}/releases/download/dev-v$new_version/box_for_root-v$new_version.zip"
+        fi
+        
+        jq --arg version "v$new_version" \
+           --arg versionCode "$new_code" \
+           --arg zipUrl "$zip_url" \
+           '.version = $version | .versionCode = $versionCode | .zipUrl = $zipUrl' \
+           update.json > update.json.tmp && mv update.json.tmp update.json
+        
+        echo "✅ 模块信息已更新"
+        echo "📋 新module.prop内容:"
+        cat module.prop
+        echo "📋 新update.json内容:"
+        cat update.json
+
+    - name: 🔍 验证模块完整性
+      run: |
+        echo "🔍 验证模块结构..."
+        
+        # 检查必需文件
+        required_files=(
+          "module.prop"
+          "customize.sh" 
+          "uninstall.sh"
+          "META-INF/com/google/android/update-binary"
+          "META-INF/com/google/android/updater-script"
+        )
+        
+        missing_files=()
+        for file in "${required_files[@]}"; do
+          if [ ! -f "$file" ]; then
+            missing_files+=("$file")
+          else
+            echo "✅ $file"
+          fi
+        done
+        
+        if [ ${#missing_files[@]} -gt 0 ]; then
+          echo "❌ 缺少必需文件:"
+          printf '%s\n' "${missing_files[@]}"
+          exit 1
+        fi
+        
+        # 检查box目录结构
+        if [ ! -d "box" ]; then
+          echo "❌ box目录不存在"
+          exit 1
+        fi
+        
+        # 检查sing-box配置
+        if [ ! -f "box/sing-box/config.json" ]; then
+          echo "❌ sing-box配置文件不存在"
+          exit 1
+        fi
+        
+        # 验证JSON配置文件
+        if ! jq empty box/sing-box/config.json; then
+          echo "❌ sing-box配置文件JSON格式无效"
+          exit 1
+        fi
+        
+        if [ -f "box/sing-box/zashboard-config.json" ] && ! jq empty box/sing-box/zashboard-config.json; then
+          echo "❌ zashboard配置文件JSON格式无效"
+          exit 1
+        fi
+        
+        # 检查脚本文件权限和语法
+        script_files=("customize.sh" "uninstall.sh" "box_service.sh")
+        for script in "${script_files[@]}"; do
+          if [ -f "$script" ]; then
+            if ! bash -n "$script"; then
+              echo "❌ $script 语法错误"
+              exit 1
+            else
+              echo "✅ $script 语法正确"
+            fi
+          fi
+        done
+        
+        echo "✅ 模块完整性验证通过"
+
+    - name: 📦 构建模块压缩包
+      run: |
+        new_version="${{ steps.version.outputs.new_version }}"
+        
+        echo "📦 开始构建模块..."
+        
+        # 清理不需要的文件
+        find . -name ".DS_Store" -delete
+        find . -name "Thumbs.db" -delete
+        find . -name "*.tmp" -delete
+        
+        # 创建构建目录
+        mkdir -p build
+        
+        # 排除的文件和目录
+        exclude_patterns=(
+          ".git/*"
+          ".github/*" 
+          "docs/*"
+          "build/*"
+          "*.md"
+          "update.json"
+          "test_*.sh"
+          "*.log"
+          ".gitignore"
+          ".gitattributes"
+        )
+        
+        # 构建zip命令的排除参数
+        exclude_args=""
+        for pattern in "${exclude_patterns[@]}"; do
+          exclude_args="$exclude_args -x '$pattern'"
+        done
+        
+        # 创建压缩包
+        zip_name="box_for_root-v$new_version.zip"
+        eval "zip -r -9 -q \"build/$zip_name\" . $exclude_args"
+        
+        # 计算文件哈希
+        cd build
+        sha256sum "$zip_name" > "$zip_name.sha256"
+        md5sum "$zip_name" > "$zip_name.md5"
+        
+        file_size=$(stat -c%s "$zip_name")
+        file_size_mb=$(echo "scale=2; $file_size / 1024 / 1024" | bc)
+        
+        echo "✅ 模块构建完成"
+        echo "📦 文件名: $zip_name"
+        echo "📦 文件大小: ${file_size_mb}MB"
+        echo "📦 SHA256: $(cat $zip_name.sha256 | cut -d' ' -f1)"
+        
+        # 输出构建信息
+        echo "zip_name=$zip_name" >> $GITHUB_ENV
+        echo "file_size=$file_size" >> $GITHUB_ENV
+        echo "file_size_mb=$file_size_mb" >> $GITHUB_ENV
+
+    - name: 📋 生成更新日志
+      id: changelog
+      run: |
+        new_version="${{ steps.version.outputs.new_version }}"
+        current_time=$(date +"%Y-%m-%d %H:%M:%S UTC")
+        
+        # 获取自上次发布以来的提交
+        if [ "${{ steps.version.outputs.is_release }}" = "true" ]; then
+          # 尝试获取上一个tag
+          last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$last_tag" ]; then
+            commits=$(git log --pretty=format:"- %s" "$last_tag"..HEAD)
+          else
+            commits=$(git log --pretty=format:"- %s" -10)
+          fi
+        else
+          # 开发版本，获取最近的提交
+          commits=$(git log --pretty=format:"- %s" -5)
+        fi
+        
+        # 创建发布说明
+        {
+          echo "## 🎉 sing-box专用Magisk模块"
+          echo ""
+          echo "### 📦 版本信息"
+          echo "- 版本: v$new_version"
+          echo "- 构建时间: $current_time"
+          echo "- 文件大小: ${{ env.file_size_mb }}MB"
+          echo "- 支持架构: amd64, arm64, armv7"
+          echo ""
+          echo "### 🚀 主要特性"
+          echo "- 专为sing-box优化的Magisk模块"
+          echo "- 集成Zashboard Web管理界面"
+          echo "- 多种网络模式支持 (tproxy, redirect, tun, enhance)"
+          echo "- 智能分流和规则管理"
+          echo "- 性能优化的cgroup配置"
+          echo "- 完整的应用代理控制"
+          echo ""
+          echo "### 📋 更新内容"
+          echo "$commits"
+          echo ""
+          echo "### 📥 安装方法"
+          echo "1. 下载 box_for_root-v$new_version.zip"
+          echo "2. 在Magisk Manager中选择并安装模块"
+          echo "3. 重启设备"
+          echo "4. 配置sing-box和启动服务"
+          echo ""
+          echo "### 🔧 配置文件"
+          echo "- sing-box配置: /data/adb/box/sing-box/config.json"
+          echo "- 模块设置: /data/adb/box/settings.ini"
+          echo "- Web界面: http://127.0.0.1:9090"
+          echo ""
+          echo "### 📋 验证信息"
+          echo "- SHA256: $(cat build/${{ env.zip_name }}.sha256 | cut -d' ' -f1)"
+          echo "- MD5: $(cat build/${{ env.zip_name }}.md5 | cut -d' ' -f1)"
+          echo ""
+          echo "---"
+          echo "*此版本由GitHub Actions自动构建*"
+        } > release_notes.md
+        
+        echo "✅ 更新日志已生成"
+
+    - name: 🚀 创建GitHub Release
+      if: steps.version.outputs.is_release == 'true'
+      run: |
+        new_version="${{ steps.version.outputs.new_version }}"
+        
+        # 创建发布
+        gh release create "v$new_version" \
+          --title "🎉 Box for Magisk v$new_version" \
+          --notes-file release_notes.md \
+          build/${{ env.zip_name }} \
+          build/${{ env.zip_name }}.sha256 \
+          build/${{ env.zip_name }}.md5
+        
+        echo "✅ GitHub Release已创建: v$new_version"
+
+    - name: 📤 上传开发版本
+      if: steps.version.outputs.is_release == 'false'
+      run: |
+        new_version="${{ steps.version.outputs.new_version }}"
+        
+        # 创建或更新开发版本标签
+        git tag -f "dev-v$new_version"
+        git push origin "dev-v$new_version" --force
+        
+        # 删除现有的开发版本发布(如果存在)
+        gh release delete "dev-v$new_version" --yes || true
+        
+        # 创建新的开发版本发布
+        gh release create "dev-v$new_version" \
+          --title "🔧 开发版本 v$new_version" \
+          --notes-file release_notes.md \
+          --prerelease \
+          build/${{ env.zip_name }} \
+          build/${{ env.zip_name }}.sha256 \
+          build/${{ env.zip_name }}.md5
+        
+        echo "✅ 开发版本已上传: dev-v$new_version"
+
+    - name: 📊 输出构建结果
+      run: |
+        new_version="${{ steps.version.outputs.new_version }}"
+        is_release="${{ steps.version.outputs.is_release }}"
+        
+        echo "## 🎉 模块构建完成!"
+        echo "**版本**: v$new_version"
+        echo "**类型**: $([ "$is_release" = "true" ] && echo "正式发布" || echo "开发版本")"
+        echo "**文件**: ${{ env.zip_name }}"
+        echo "**大小**: ${{ env.file_size_mb }}MB"
+        echo "**构建时间**: $(date +"%Y-%m-%d %H:%M:%S UTC")"
+        echo ""
+        echo "### 📋 下一步操作:"
+        if [ "$is_release" = "true" ]; then
+          echo "1. 检查GitHub Release页面"
+          echo "2. 测试模块安装和功能"
+          echo "3. 更新文档和说明"
+        else
+          echo "1. 查看开发版本构建结果"  
+          echo "2. 进行功能测试"
+          echo "3. 准备正式发布"
+        fi
+
+  notify-failure:
+    needs: build-module
+    if: failure()
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📢 发送构建失败通知
+      run: |
+        echo "❌ 模块构建失败"
+        echo "**时间**: $(date +"%Y-%m-%d %H:%M:%S UTC")"
+        echo "**工作流**: ${{ github.workflow }}"
+        echo "**运行ID**: ${{ github.run_id }}"
+        echo "**触发事件**: ${{ github.event_name }}"
+        
+        # 这里可以添加其他通知方式，如邮件、Slack等

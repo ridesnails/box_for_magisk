@@ -1,0 +1,48 @@
+{
+  "zashboard": {
+    "name": "Box for Magisk - Sing-box Branch",
+    "version": "1.0.0",
+    "description": "专为 sing-box 优化的 Zashboard 管理界面",
+    "api": {
+      "host": "127.0.0.1",
+      "port": 9090,
+      "secret": "",
+      "endpoints": {
+        "config": "/configs",
+        "proxies": "/proxies",
+        "rules": "/rules",
+        "connections": "/connections",
+        "logs": "/logs",
+        "version": "/version"
+      }
+    },
+    "features": {
+      "multiCore": false,
+      "enhanceMode": true,
+      "betaUpdates": true,
+      "performanceMonitor": true,
+      "logViewer": true,
+      "ruleEditor": false,
+      "subscriptionManager": false
+    },
+    "ui": {
+      "theme": "auto",
+      "language": "zh-CN",
+      "animations": true,
+      "compactMode": false
+    },
+    "network": {
+      "mode": "enhance",
+      "ipv6": false,
+      "tproxy_port": 9898,
+      "redir_port": 9797,
+      "mixed_port": 7890
+    },
+    "security": {
+      "localAccess": true,
+      "authRequired": false,
+      "corsEnabled": true,
+      "allowedOrigins": ["http://127.0.0.1:*", "http://localhost:*"]
+    }
+  }
+}

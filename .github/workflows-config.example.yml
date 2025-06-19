@@ -1,0 +1,194 @@
+# GitHub Actions 配置示例文件
+# 复制此文件并根据需要修改配置
+
+# 全局环境变量
+env:
+  # GitHub Token (自动提供，无需修改)
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
+  # 可选：自定义通知配置
+  # SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+  # EMAIL_NOTIFICATION: ${{ secrets.EMAIL_NOTIFICATION }}
+
+# 定时任务配置
+schedule_config:
+  # sing-box更新时间 (UTC时区)
+  singbox_update: "0 2,14 * * *"  # 每天02:00和14:00
+  
+  # Zashboard更新时间 (UTC时区)  
+  zashboard_update: "0 4,16 * * *"  # 每天04:00和16:00
+  
+  # 集成测试时间 (UTC时区)
+  integration_test: "0 3 * * *"     # 每天03:00
+
+# API限制配置
+api_limits:
+  # GitHub API最小剩余调用次数
+  min_remaining: 10
+  
+  # 重试配置
+  max_retries: 3
+  retry_delay: 5  # 秒
+
+# 版本管理配置
+version_config:
+  # 语义化版本格式
+  version_format: "v{major}.{minor}.{patch}"
+  
+  # 开发版本格式
+  dev_format: "v{version}-dev.{build}"
+  
+  # 版本代码格式
+  version_code_format: "%Y%m%d"
+
+# 构建配置
+build_config:
+  # 支持的架构
+  architectures:
+    - amd64
+    - arm64
+    - armv7
+  
+  # 排除文件模式
+  exclude_patterns:
+    - ".git/*"
+    - ".github/*"
+    - "docs/*"
+    - "*.md"
+    - "*.log"
+    - "test_*.sh"
+  
+  # 压缩级别
+  compression_level: 9
+
+# 通知配置
+notification_config:
+  # 成功通知
+  notify_success: true
+  
+  # 失败通知  
+  notify_failure: true
+  
+  # 通知渠道
+  channels:
+    - github_issues    # GitHub Issues
+    - github_discussions # GitHub Discussions
+    # - slack          # Slack (需要配置SLACK_WEBHOOK)
+    # - email          # 邮件 (需要配置EMAIL_NOTIFICATION)
+
+# 安全配置
+security_config:
+  # 文件完整性验证
+  verify_checksums: true
+  
+  # 下载超时 (秒)
+  download_timeout: 300
+  
+  # 最大文件大小 (MB)
+  max_file_size: 100
+
+# 缓存配置
+cache_config:
+  # Node.js依赖缓存
+  node_cache: true
+  
+  # 构建产物缓存
+  build_cache: true
+  
+  # 缓存过期时间 (天)
+  cache_ttl: 7
+
+# 测试配置
+test_config:
+  # ShellCheck排除规则
+  shellcheck_exclude:
+    - SC2034  # 未使用变量
+    - SC2086  # 双引号防止分词
+    - SC2181  # 检查退出码
+    - SC2155  # 声明和赋值分离
+  
+  # JSON验证工具
+  json_validator: "jq"
+  
+  # 脚本语法检查
+  shell_syntax_check: true
+
+# 发布配置
+release_config:
+  # 自动创建发布
+  auto_release: true
+  
+  # 预发布标记
+  prerelease_pattern: "*-dev.*"
+  
+  # 发布资产
+  assets:
+    - "*.zip"
+    - "*.sha256"
+    - "*.md5"
+  
+  # 发布模板
+  release_template: |
+    ## 🎉 sing-box专用Magisk模块
+    
+    ### 📦 版本信息
+    - 版本: {version}
+    - 构建时间: {build_time}
+    - 文件大小: {file_size}
+    
+    ### 🚀 主要特性
+    - 专为sing-box优化的Magisk模块
+    - 集成Zashboard Web管理界面
+    - 多种网络模式支持
+    - 智能分流和规则管理
+    
+    ### 📥 安装方法
+    1. 下载模块文件
+    2. 在Magisk Manager中安装
+    3. 重启设备
+    4. 配置并启动服务
+
+# 监控配置
+monitoring_config:
+  # 性能监控
+  performance_monitoring: true
+  
+  # 资源使用监控
+  resource_monitoring: true
+  
+  # 错误率监控
+  error_rate_monitoring: true
+  
+  # 监控阈值
+  thresholds:
+    build_time_max: 600     # 最大构建时间 (秒)
+    file_size_max: 50       # 最大文件大小 (MB)
+    error_rate_max: 0.05    # 最大错误率 (5%)
+
+# 工作流优化配置
+optimization_config:
+  # 并发执行
+  parallel_jobs: true
+  
+  # 条件执行
+  conditional_execution: true
+  
+  # 资源复用
+  resource_reuse: true
+  
+  # 缓存策略
+  cache_strategy: "aggressive"
+
+# 维护配置
+maintenance_config:
+  # 自动清理旧版本
+  auto_cleanup: true
+  
+  # 保留版本数量
+  keep_releases: 10
+  
+  # 清理间隔 (天)
+  cleanup_interval: 30
+  
+  # 备份策略
+  backup_strategy: "incremental"

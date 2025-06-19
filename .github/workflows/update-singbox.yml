@@ -1,0 +1,358 @@
+name: 🔄 Update sing-box Core
+
+on:
+  schedule:
+    # 每天的 02:00 和 14:00 UTC 检查更新 (避免GitHub API限制)
+    - cron: '0 2,14 * * *'
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: '强制更新到最新版本'
+        required: false
+        default: false
+        type: boolean
+      include_beta:
+        description: '包含Beta版本'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  check-singbox-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_update: ${{ steps.check.outputs.should_update }}
+      new_version: ${{ steps.check.outputs.new_version }}
+      current_version: ${{ steps.check.outputs.current_version }}
+      download_urls: ${{ steps.check.outputs.download_urls }}
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 🔍 检查sing-box版本
+      id: check
+      run: |
+        # 获取当前版本信息
+        if [ -f "box/bin/.bin" ]; then
+          current_version=$(grep -o 'sing-box:[^:]*' box/bin/.bin | cut -d':' -f2 || echo "unknown")
+        else
+          current_version="unknown"
+        fi
+        echo "current_version=$current_version" >> $GITHUB_OUTPUT
+        echo "📦 当前版本: $current_version"
+        
+        # 检查GitHub API限制
+        api_remaining=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+          "https://api.github.com/rate_limit" | jq -r '.rate.remaining')
+        echo "🔥 GitHub API剩余调用次数: $api_remaining"
+        
+        if [ "$api_remaining" -lt 10 ]; then
+          echo "⚠️ GitHub API调用次数不足，跳过此次检查"
+          echo "should_update=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # 获取最新版本信息
+        if [ "${{ github.event.inputs.include_beta }}" = "true" ]; then
+          # 包含预发布版本
+          latest_release=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/SagerNet/sing-box/releases" | \
+            jq -r '.[0]')
+        else
+          # 仅稳定版本
+          latest_release=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/SagerNet/sing-box/releases/latest")
+        fi
+        
+        new_version=$(echo "$latest_release" | jq -r '.tag_name')
+        release_name=$(echo "$latest_release" | jq -r '.name')
+        is_prerelease=$(echo "$latest_release" | jq -r '.prerelease')
+        
+        echo "🎯 最新版本: $new_version"
+        echo "📝 发布名称: $release_name"
+        echo "🧪 预发布版本: $is_prerelease"
+        echo "new_version=$new_version" >> $GITHUB_OUTPUT
+        
+        # 检查是否需要更新
+        should_update=false
+        if [ "${{ github.event.inputs.force_update }}" = "true" ]; then
+          should_update=true
+          echo "🔄 强制更新模式"
+        elif [ "$current_version" != "$new_version" ] && [ "$new_version" != "null" ]; then
+          should_update=true
+          echo "✅ 发现新版本，需要更新"
+        else
+          echo "📋 版本已是最新，无需更新"
+        fi
+        
+        echo "should_update=$should_update" >> $GITHUB_OUTPUT
+        
+        # 构建下载URL列表
+        if [ "$should_update" = "true" ]; then
+          # 获取资产下载链接
+          download_urls=$(echo "$latest_release" | jq -r '.assets[] | 
+            select(.name | test("sing-box-.*-linux-(amd64|arm64|armv7)\\.tar\\.gz$")) | 
+            .browser_download_url' | tr '\n' ' ')
+          echo "📦 下载链接: $download_urls"
+          echo "download_urls=$download_urls" >> $GITHUB_OUTPUT
+        fi
+
+  update-singbox:
+    needs: check-singbox-version
+    if: needs.check-singbox-version.outputs.should_update == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: ⚙️ 设置Git配置
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+
+    - name: 📦 下载和更新sing-box二进制文件
+      run: |
+        new_version="${{ needs.check-singbox-version.outputs.new_version }}"
+        download_urls="${{ needs.check-singbox-version.outputs.download_urls }}"
+        
+        echo "🔄 开始更新sing-box到版本: $new_version"
+        
+        # 创建临时下载目录
+        mkdir -p temp_download
+        cd temp_download
+        
+        # 下载各架构的二进制文件
+        success_count=0
+        total_count=0
+        
+        for url in $download_urls; do
+          filename=$(basename "$url")
+          total_count=$((total_count + 1))
+          
+          echo "📥 下载: $filename"
+          
+          # 重试机制下载
+          retry_count=0
+          max_retries=3
+          
+          while [ $retry_count -lt $max_retries ]; do
+            if curl -L -f -o "$filename" "$url"; then
+              echo "✅ 下载成功: $filename"
+              
+              # 验证文件完整性
+              if [ -s "$filename" ] && file "$filename" | grep -q "gzip compressed"; then
+                # 解压并提取二进制文件
+                tar -xzf "$filename"
+                
+                # 查找sing-box二进制文件
+                singbox_binary=$(find . -name "sing-box" -type f | head -1)
+                
+                if [ -n "$singbox_binary" ] && [ -x "$singbox_binary" ]; then
+                  # 检测架构
+                  if echo "$filename" | grep -q "amd64"; then
+                    arch="amd64"
+                  elif echo "$filename" | grep -q "arm64"; then
+                    arch="arm64"
+                  elif echo "$filename" | grep -q "armv7"; then
+                    arch="armv7"
+                  else
+                    arch="unknown"
+                  fi
+                  
+                  # 复制到对应目录
+                  mkdir -p "../box/bin/$arch"
+                  cp "$singbox_binary" "../box/bin/$arch/sing-box"
+                  chmod +x "../box/bin/$arch/sing-box"
+                  
+                  echo "✅ 成功安装 $arch 架构的sing-box"
+                  success_count=$((success_count + 1))
+                else
+                  echo "❌ 未找到有效的sing-box二进制文件在 $filename"
+                fi
+                
+                # 清理解压的文件
+                find . -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +
+              else
+                echo "❌ 文件完整性验证失败: $filename"
+              fi
+              break
+            else
+              retry_count=$((retry_count + 1))
+              echo "⚠️ 下载失败 (尝试 $retry_count/$max_retries): $filename"
+              sleep 5
+            fi
+          done
+          
+          if [ $retry_count -eq $max_retries ]; then
+            echo "❌ 下载最终失败: $filename"
+          fi
+        done
+        
+        cd ..
+        rm -rf temp_download
+        
+        echo "📊 下载统计: $success_count/$total_count 成功"
+        
+        if [ $success_count -eq 0 ]; then
+          echo "❌ 所有下载都失败了"
+          exit 1
+        fi
+        
+        # 更新.bin文件
+        echo "sing-box:$new_version" > box/bin/.bin
+        
+        # 更新版本信息到update.json
+        current_date=$(date +"%Y%m%d")
+        jq --arg version "$new_version" \
+           --arg versionCode "$current_date" \
+           '.version = $version | .versionCode = $versionCode' \
+           update.json > update.json.tmp && mv update.json.tmp update.json
+
+    - name: 📝 生成更新日志
+      run: |
+        new_version="${{ needs.check-singbox-version.outputs.new_version }}"
+        current_version="${{ needs.check-singbox-version.outputs.current_version }}"
+        current_date=$(date +"%Y-%m-%d")
+        current_time=$(date +"%Y-%m-%d %H:%M:%S UTC")
+        
+        # 获取sing-box发布说明
+        release_notes=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+          "https://api.github.com/repos/SagerNet/sing-box/releases/tags/$new_version" | \
+          jq -r '.body // "无发布说明"')
+        
+        # 创建更新日志条目
+        {
+          echo ""
+          echo "## [$new_version] - $current_date"
+          echo ""
+          echo "### 🔄 sing-box核心更新"
+          echo "- 更新版本: $current_version → $new_version"
+          echo "- 更新时间: $current_time"
+          echo "- 更新方式: 自动更新"
+          echo ""
+          echo "### 📋 sing-box发布说明"
+          echo "$release_notes"
+          echo ""
+          echo "### 🏗️ 架构支持"
+          echo "- linux-amd64"
+          echo "- linux-arm64"
+          echo "- linux-armv7"
+          echo ""
+        } >> CHANGELOG.md
+
+    - name: 🔍 验证更新
+      run: |
+        # 检查二进制文件是否存在
+        for arch in amd64 arm64 armv7; do
+          if [ -f "box/bin/$arch/sing-box" ]; then
+            echo "✅ $arch: 二进制文件存在"
+            file_info=$(file "box/bin/$arch/sing-box")
+            echo "   文件信息: $file_info"
+          else
+            echo "❌ $arch: 二进制文件缺失"
+          fi
+        done
+        
+        # 检查.bin文件
+        if [ -f "box/bin/.bin" ]; then
+          echo "✅ .bin文件已更新: $(cat box/bin/.bin)"
+        else
+          echo "❌ .bin文件缺失"
+        fi
+        
+        # 检查update.json文件
+        if [ -f "update.json" ]; then
+          echo "✅ update.json已更新:"
+          cat update.json | jq .
+        else
+          echo "❌ update.json文件缺失"
+        fi
+
+    - name: 📤 提交变更
+      run: |
+        new_version="${{ needs.check-singbox-version.outputs.new_version }}"
+        current_time=$(date +"%Y-%m-%d %H:%M:%S UTC")
+        
+        git add .
+        
+        if ! git diff --staged --quiet; then
+          git commit -m "🔄 自动更新sing-box到 $new_version" \
+                     -m "- 更新sing-box核心到版本 $new_version" \
+                     -m "- 支持多架构: amd64, arm64, armv7" \
+                     -m "- 自动更新版本信息和配置文件" \
+                     -m "- 更新时间: $current_time" \
+                     -m "" \
+                     -m "Co-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          
+          echo "✅ 变更已提交"
+        else
+          echo "📋 没有需要提交的变更"
+        fi
+
+    - name: 🚀 创建Pull Request
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: "🔄 自动更新sing-box到 ${{ needs.check-singbox-version.outputs.new_version }}"
+        title: "🔄 自动更新sing-box核心到 ${{ needs.check-singbox-version.outputs.new_version }}"
+        body: |
+          ## 🔄 sing-box自动更新
+          
+          **当前版本**: `${{ needs.check-singbox-version.outputs.current_version }}`
+          **新版本**: `${{ needs.check-singbox-version.outputs.new_version }}`
+          **更新时间**: $(date +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ### 📋 更新内容
+          - ✅ 更新sing-box核心二进制文件
+          - ✅ 支持多架构 (amd64, arm64, armv7)
+          - ✅ 更新版本信息文件
+          - ✅ 自动生成更新日志
+          
+          ### 🔍 验证项目
+          - [ ] 二进制文件完整性
+          - [ ] 配置文件兼容性
+          - [ ] 模块打包测试
+          
+          ---
+          *此PR由GitHub Actions自动创建*
+        branch: feature/update-singbox-${{ needs.check-singbox-version.outputs.new_version }}
+        delete-branch: true
+
+    - name: 📊 输出更新结果
+      run: |
+        echo "## 🎉 sing-box更新完成!"
+        echo "**新版本**: ${{ needs.check-singbox-version.outputs.new_version }}"
+        echo "**支持架构**: amd64, arm64, armv7"
+        echo "**更新时间**: $(date +"%Y-%m-%d %H:%M:%S UTC")"
+        echo ""
+        echo "### 📋 下一步操作:"
+        echo "1. 检查并合并创建的Pull Request"
+        echo "2. 测试新版本的功能"
+        echo "3. 等待自动打包完成"
+
+  notify-failure:
+    needs: [check-singbox-version, update-singbox]
+    if: failure()
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📢 发送失败通知
+      run: |
+        echo "❌ sing-box自动更新失败"
+        echo "**时间**: $(date +"%Y-%m-%d %H:%M:%S UTC")"
+        echo "**工作流**: ${{ github.workflow }}"
+        echo "**运行ID**: ${{ github.run_id }}"
+        
+        # 这里可以添加其他通知方式，如邮件、Slack等
+        # 例如发送到Issues或Discussion

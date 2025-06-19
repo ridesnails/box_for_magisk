@@ -448,9 +448,19 @@ start_tproxy() {
   if [ "${iptables}" = "$IPV" ]; then
     ip rule add fwmark "${fwmark}" table "${table}" pref "${pref}"
     ip route add local default dev lo table "${table}"
+    # Enhanced mode: Add table 100 routing for enhance mode
+    if [ "${network_mode}" = "enhance" ]; then
+      ip rule add fwmark 1 table 100 pref 100
+      ip route add local 0.0.0.0/0 dev lo table 100
+    fi
   else
     ip -6 rule add fwmark "${fwmark}" table "${table}" pref "${pref}"
     ip -6 route add local default dev lo table "${table}"
+    # Enhanced mode: Add table 100 routing for enhance mode
+    if [ "${network_mode}" = "enhance" ]; then
+      ip -6 rule add fwmark 1 table 100 pref 100
+      ip -6 route add local ::/0 dev lo table 100
+    fi
   fi
 
   ${iptables} -t mangle -N BOX_EXTERNAL 2>/dev/null
@@ -651,11 +661,23 @@ stop_tproxy() {
     ip route del local default dev lo table "${table}"
     ip route flush table "${table}"
     ip rule del pref "${pref}"
+    # Enhanced mode: Clean up table 100 routing for enhance mode
+    if [ "${network_mode}" = "enhance" ]; then
+      ip rule del fwmark 1 table 100 pref 100 2>/dev/null
+      ip route del local 0.0.0.0/0 dev lo table 100 2>/dev/null
+      ip route flush table 100 2>/dev/null
+    fi
   else
     ip -6 rule del fwmark "${fwmark}" table "${table}" pref "${pref}"
     ip -6 route del local default dev lo table "${table}"
     ip -6 route flush table "${table}"
     ip -6 rule del pref "${pref}"
+    # Enhanced mode: Clean up table 100 routing for enhance mode
+    if [ "${network_mode}" = "enhance" ]; then
+      ip -6 rule del fwmark 1 table 100 pref 100 2>/dev/null
+      ip -6 route del local ::/0 dev lo table 100 2>/dev/null
+      ip -6 route flush table 100 2>/dev/null
+    fi
   fi
 
   ${iptables} -t mangle -D PREROUTING -j BOX_EXTERNAL

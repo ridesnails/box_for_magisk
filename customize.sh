@@ -23,11 +23,37 @@ service_dir="/data/adb/service.d"
 if [ "$KSU" = "true" ]; then
   ui_print "- KernelSU version: $KSU_VER ($KSU_VER_CODE)"
   [ "$KSU_VER_CODE" -lt 10683 ] && service_dir="/data/adb/ksu/service.d"
+  
+  # Enhanced KernelSU integration optimizations
+  ui_print "- Applying KernelSU specific optimizations"
+  
+  # Set KernelSU specific environment variables
+  export KSU_MODULE_DIR="/data/adb/modules"
+  export KSU_BIN_DIR="/data/adb/ksu/bin"
+  
+  # Optimize for KernelSU permission model
+  if [ -d "/data/adb/ksu" ]; then
+    ui_print "- Configuring KernelSU permission model"
+    # Ensure proper KernelSU module loading mechanism
+    mkdir -p "/data/adb/ksu/modules_update"
+    # Set enhanced permissions for KernelSU environment
+    chmod 755 "/data/adb/ksu" 2>/dev/null
+  fi
+  
 elif [ "$APATCH" = "true" ]; then
   APATCH_VER=$(cat "/data/adb/ap/version")
   ui_print "- APatch version: $APATCH_VER"
+  
+  # APatch specific optimizations
+  export AP_MODULE_DIR="/data/adb/modules"
+  export AP_BIN_DIR="/data/adb/ap/bin"
+  
 else
   ui_print "- Magisk version: $MAGISK_VER ($MAGISK_VER_CODE)"
+  
+  # Magisk specific optimizations
+  export MAGISK_MODULE_DIR="/data/adb/modules"
+  export MAGISK_BIN_DIR="/data/adb/magisk"
 fi
 
 # Set up service directory and clean old installations
@@ -59,14 +85,34 @@ unzip -j -o "$ZIPFILE" 'uninstall.sh' -d "$MODPATH" >&2
 unzip -j -o "$ZIPFILE" 'skip_mount' -d "$MODPATH" >&2
 unzip -j -o "$ZIPFILE" 'box_service.sh' -d "${service_dir}" >&2
 
-# Set permissions
-ui_print "- Setting permissions"
+# Set permissions with enhanced KernelSU/APatch compatibility
+ui_print "- Setting permissions with enhanced compatibility"
 set_perm_recursive $MODPATH 0 0 0755 0644
 set_perm_recursive /data/adb/box/ 0 3005 0755 0644
 set_perm_recursive /data/adb/box/scripts/ 0 3005 0755 0700
 set_perm ${service_dir}/box_service.sh 0 0 0755
 set_perm $MODPATH/uninstall.sh 0 0 0755
 chmod ugo+x ${service_dir}/box_service.sh $MODPATH/uninstall.sh /data/adb/box/scripts/*
+
+# Enhanced permission settings for different root solutions
+if [ "$KSU" = "true" ]; then
+  # KernelSU specific permission optimizations
+  ui_print "- Applying KernelSU enhanced permissions"
+  chown -R 0:3005 /data/adb/box/ 2>/dev/null
+  chmod 755 /data/adb/box/bin/ 2>/dev/null
+  # Set SELinux context for KernelSU compatibility
+  if command -v chcon >/dev/null 2>&1; then
+    chcon -R u:object_r:system_file:s0 /data/adb/box/bin/ 2>/dev/null
+  fi
+elif [ "$APATCH" = "true" ]; then
+  # APatch specific permission optimizations
+  ui_print "- Applying APatch enhanced permissions"
+  chown -R 0:3005 /data/adb/box/ 2>/dev/null
+else
+  # Magisk specific permission optimizations
+  ui_print "- Applying Magisk enhanced permissions"
+  chown -R 0:3005 /data/adb/box/ 2>/dev/null
+fi
 
 # Download prompt for optional kernel components
 ui_print "-----------------------------------------------------------"

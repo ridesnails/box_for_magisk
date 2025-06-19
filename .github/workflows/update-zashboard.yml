@@ -1,0 +1,423 @@
+name: 🎨 Update Zashboard UI
+
+on:
+  schedule:
+    # 每天的 04:00 和 16:00 UTC 检查更新 (错开与sing-box更新时间)
+    - cron: '0 4,16 * * *'
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: '强制更新到最新版本'
+        required: false
+        default: false
+        type: boolean
+      ui_version:
+        description: '指定UI版本 (留空为最新版)'
+        required: false
+        default: ''
+        type: string
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  check-zashboard-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_update: ${{ steps.check.outputs.should_update }}
+      new_version: ${{ steps.check.outputs.new_version }}
+      current_version: ${{ steps.check.outputs.current_version }}
+      download_url: ${{ steps.check.outputs.download_url }}
+      release_notes: ${{ steps.check.outputs.release_notes }}
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 🔍 检查Zashboard版本
+      id: check
+      run: |
+        # 获取当前UI版本信息
+        if [ -f "box/sing-box/zashboard-config.json" ]; then
+          current_version=$(jq -r '.version // "unknown"' box/sing-box/zashboard-config.json 2>/dev/null || echo "unknown")
+        else
+          current_version="unknown"
+        fi
+        echo "current_version=$current_version" >> $GITHUB_OUTPUT
+        echo "📦 当前Zashboard版本: $current_version"
+        
+        # 检查GitHub API限制
+        api_remaining=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+          "https://api.github.com/rate_limit" | jq -r '.rate.remaining')
+        echo "🔥 GitHub API剩余调用次数: $api_remaining"
+        
+        if [ "$api_remaining" -lt 10 ]; then
+          echo "⚠️ GitHub API调用次数不足，跳过此次检查"
+          echo "should_update=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # 获取最新版本信息
+        if [ -n "${{ github.event.inputs.ui_version }}" ]; then
+          # 使用指定版本
+          new_version="${{ github.event.inputs.ui_version }}"
+          latest_release=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/Zephyruso/zashboard/releases/tags/$new_version")
+        else
+          # 获取最新版本
+          latest_release=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/Zephyruso/zashboard/releases/latest")
+          new_version=$(echo "$latest_release" | jq -r '.tag_name')
+        fi
+        
+        release_name=$(echo "$latest_release" | jq -r '.name')
+        release_notes=$(echo "$latest_release" | jq -r '.body // "无发布说明"')
+        
+        echo "🎯 最新版本: $new_version"
+        echo "📝 发布名称: $release_name"
+        echo "new_version=$new_version" >> $GITHUB_OUTPUT
+        echo "release_notes<<EOF" >> $GITHUB_OUTPUT
+        echo "$release_notes" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+        # 检查是否需要更新
+        should_update=false
+        if [ "${{ github.event.inputs.force_update }}" = "true" ]; then
+          should_update=true
+          echo "🔄 强制更新模式"
+        elif [ "$current_version" != "$new_version" ] && [ "$new_version" != "null" ]; then
+          should_update=true
+          echo "✅ 发现新版本，需要更新"
+        else
+          echo "📋 版本已是最新，无需更新"
+        fi
+        
+        echo "should_update=$should_update" >> $GITHUB_OUTPUT
+        
+        # 获取下载链接
+        if [ "$should_update" = "true" ]; then
+          # 查找dist.zip或类似的分发文件
+          download_url=$(echo "$latest_release" | jq -r '.assets[] | 
+            select(.name | test("(dist|build|zashboard).*\\.zip$")) | 
+            .browser_download_url' | head -1)
+          
+          # 如果没找到zip文件，使用tarball
+          if [ "$download_url" = "" ] || [ "$download_url" = "null" ]; then
+            download_url=$(echo "$latest_release" | jq -r '.tarball_url')
+          fi
+          
+          echo "📦 下载链接: $download_url"
+          echo "download_url=$download_url" >> $GITHUB_OUTPUT
+        fi
+
+  update-zashboard:
+    needs: check-zashboard-version
+    if: needs.check-zashboard-version.outputs.should_update == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: ⚙️ 设置Node.js环境
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: ⚙️ 设置Git配置
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+
+    - name: 🎨 下载和更新Zashboard UI
+      run: |
+        new_version="${{ needs.check-zashboard-version.outputs.new_version }}"
+        download_url="${{ needs.check-zashboard-version.outputs.download_url }}"
+        
+        echo "🔄 开始更新Zashboard UI到版本: $new_version"
+        echo "📦 下载链接: $download_url"
+        
+        # 创建临时下载目录
+        mkdir -p temp_ui_download
+        cd temp_ui_download
+        
+        # 下载UI文件
+        echo "📥 下载Zashboard UI文件..."
+        
+        if echo "$download_url" | grep -q "\.zip$"; then
+          # 下载zip文件
+          curl -L -f -o "zashboard.zip" "$download_url"
+          
+          # 解压文件
+          unzip -q "zashboard.zip"
+          
+          # 查找dist目录或构建输出
+          if [ -d "dist" ]; then
+            ui_dir="dist"
+          elif [ -d "build" ]; then
+            ui_dir="build"
+          elif [ -d "public" ]; then
+            ui_dir="public"
+          else
+            # 查找包含index.html的目录
+            ui_dir=$(find . -name "index.html" -type f | head -1 | xargs dirname)
+          fi
+        else
+          # 下载tarball
+          curl -L -f -o "zashboard.tar.gz" "$download_url"
+          
+          # 解压tarball
+          tar -xzf "zashboard.tar.gz"
+          
+          # 查找主目录
+          main_dir=$(find . -maxdepth 1 -type d -name "*zashboard*" | head -1)
+          
+          if [ -n "$main_dir" ]; then
+            cd "$main_dir"
+            
+            # 尝试构建项目
+            if [ -f "package.json" ]; then
+              echo "📦 安装依赖并构建项目..."
+              npm install
+              
+              # 尝试不同的构建命令
+              if npm run build >/dev/null 2>&1; then
+                echo "✅ 使用 npm run build 构建成功"
+              elif npm run dist >/dev/null 2>&1; then
+                echo "✅ 使用 npm run dist 构建成功"
+              else
+                echo "⚠️ 无法自动构建，使用源文件"
+              fi
+            fi
+            
+            # 查找构建输出目录
+            if [ -d "dist" ]; then
+              ui_dir="dist"
+            elif [ -d "build" ]; then
+              ui_dir="build"
+            elif [ -d "public" ]; then
+              ui_dir="public"
+            else
+              ui_dir="."
+            fi
+          else
+            echo "❌ 无法找到主目录"
+            exit 1
+          fi
+        fi
+        
+        echo "📁 UI目录: $ui_dir"
+        
+        if [ ! -d "$ui_dir" ] || [ ! -f "$ui_dir/index.html" ]; then
+          echo "❌ 未找到有效的UI文件"
+          exit 1
+        fi
+        
+        # 备份现有webroot
+        cd ..
+        if [ -d "webroot" ]; then
+          cp -r webroot webroot_backup
+          echo "💾 已备份现有webroot"
+        fi
+        
+        # 清理并复制新的UI文件
+        rm -rf webroot/*
+        cp -r "temp_ui_download/$ui_dir"/* webroot/
+        
+        echo "✅ UI文件已更新"
+        
+        # 清理临时文件
+        rm -rf temp_ui_download
+
+    - name: 🔧 配置Zashboard
+      run: |
+        new_version="${{ needs.check-zashboard-version.outputs.new_version }}"
+        current_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        
+        # 更新zashboard配置文件
+        jq -n \
+          --arg version "$new_version" \
+          --arg updated_at "$current_date" \
+          '{
+            "version": $version,
+            "updated_at": $updated_at,
+            "source": "https://github.com/Zephyruso/zashboard",
+            "api_endpoint": "http://127.0.0.1:9090",
+            "features": {
+              "auto_update": true,
+              "dark_mode": true,
+              "connection_stats": true
+            },
+            "ui_path": "/data/adb/box/webroot"
+          }' > box/sing-box/zashboard-config.json
+        
+        # 检查webroot中是否有配置文件需要更新
+        if [ -f "webroot/config.js" ]; then
+          # 更新API端点配置
+          sed -i 's/localhost:9090/127.0.0.1:9090/g' webroot/config.js
+          echo "✅ 已更新API端点配置"
+        fi
+        
+        # 确保权限正确
+        find webroot -type f -exec chmod 644 {} \;
+        find webroot -type d -exec chmod 755 {} \;
+        
+        echo "✅ Zashboard配置完成"
+
+    - name: 📝 生成更新日志
+      run: |
+        new_version="${{ needs.check-zashboard-version.outputs.new_version }}"
+        current_version="${{ needs.check-zashboard-version.outputs.current_version }}"
+        current_date=$(date +"%Y-%m-%d")
+        current_time=$(date +"%Y-%m-%d %H:%M:%S UTC")
+        release_notes="${{ needs.check-zashboard-version.outputs.release_notes }}"
+        
+        # 创建更新日志条目
+        {
+          echo ""
+          echo "## [UI-$new_version] - $current_date"
+          echo ""
+          echo "### 🎨 Zashboard UI更新"
+          echo "- 更新版本: $current_version → $new_version"
+          echo "- 更新时间: $current_time"
+          echo "- 更新方式: 自动更新"
+          echo ""
+          echo "### 📋 Zashboard发布说明"
+          echo "$release_notes"
+          echo ""
+          echo "### 🛠️ 更新内容"
+          echo "- 更新Web界面文件"
+          echo "- 更新配置文件"
+          echo "- 优化API端点配置"
+          echo ""
+        } >> CHANGELOG.md
+
+    - name: 🔍 验证更新
+      run: |
+        # 检查webroot目录
+        if [ -d "webroot" ] && [ -f "webroot/index.html" ]; then
+          echo "✅ webroot目录和index.html存在"
+          file_count=$(find webroot -type f | wc -l)
+          echo "   文件总数: $file_count"
+        else
+          echo "❌ webroot目录或index.html缺失"
+          exit 1
+        fi
+        
+        # 检查配置文件
+        if [ -f "box/sing-box/zashboard-config.json" ]; then
+          echo "✅ zashboard配置文件已更新:"
+          cat box/sing-box/zashboard-config.json | jq .
+        else
+          echo "❌ zashboard配置文件缺失"
+        fi
+        
+        # 检查常见UI文件
+        ui_files=("index.html" "assets" "js" "css")
+        for file in "${ui_files[@]}"; do
+          if [ -e "webroot/$file" ]; then
+            echo "✅ $file 存在"
+          else
+            echo "⚠️ $file 不存在"
+          fi
+        done
+
+    - name: 📤 提交变更
+      run: |
+        new_version="${{ needs.check-zashboard-version.outputs.new_version }}"
+        current_time=$(date +"%Y-%m-%d %H:%M:%S UTC")
+        
+        git add .
+        
+        if ! git diff --staged --quiet; then
+          git commit -m "🎨 自动更新Zashboard UI到 $new_version" \
+                     -m "- 更新Zashboard UI到版本 $new_version" \
+                     -m "- 更新Web界面文件和配置" \
+                     -m "- 优化API端点配置" \
+                     -m "- 更新时间: $current_time" \
+                     -m "" \
+                     -m "Co-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          
+          echo "✅ 变更已提交"
+        else
+          echo "📋 没有需要提交的变更"
+        fi
+
+    - name: 🚀 创建Pull Request
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: "🎨 自动更新Zashboard UI到 ${{ needs.check-zashboard-version.outputs.new_version }}"
+        title: "🎨 自动更新Zashboard UI到 ${{ needs.check-zashboard-version.outputs.new_version }}"
+        body: |
+          ## 🎨 Zashboard UI自动更新
+          
+          **当前版本**: `${{ needs.check-zashboard-version.outputs.current_version }}`
+          **新版本**: `${{ needs.check-zashboard-version.outputs.new_version }}`
+          **更新时间**: $(date +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ### 📋 更新内容
+          - ✅ 更新Zashboard Web界面
+          - ✅ 更新UI配置文件
+          - ✅ 优化API端点配置
+          - ✅ 保持配置兼容性
+          
+          ### 🔍 验证项目
+          - [ ] Web界面功能测试
+          - [ ] API连接测试
+          - [ ] 响应式布局测试
+          - [ ] 浏览器兼容性测试
+          
+          ### 📋 Zashboard发布说明
+          ${{ needs.check-zashboard-version.outputs.release_notes }}
+          
+          ---
+          *此PR由GitHub Actions自动创建*
+        branch: feature/update-zashboard-${{ needs.check-zashboard-version.outputs.new_version }}
+        delete-branch: true
+
+    - name: 🔙 回滚机制
+      if: failure()
+      run: |
+        echo "❌ 更新失败，执行回滚..."
+        
+        if [ -d "webroot_backup" ]; then
+          rm -rf webroot
+          mv webroot_backup webroot
+          echo "✅ 已回滚到之前的UI版本"
+        else
+          echo "⚠️ 没有找到备份，无法回滚"
+        fi
+
+    - name: 📊 输出更新结果
+      run: |
+        echo "## 🎉 Zashboard UI更新完成!"
+        echo "**新版本**: ${{ needs.check-zashboard-version.outputs.new_version }}"
+        echo "**更新时间**: $(date +"%Y-%m-%d %H:%M:%S UTC")"
+        echo ""
+        echo "### 📋 下一步操作:"
+        echo "1. 检查并合并创建的Pull Request"
+        echo "2. 测试Web界面功能"
+        echo "3. 验证API连接正常"
+
+  notify-failure:
+    needs: [check-zashboard-version, update-zashboard]
+    if: failure()
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📢 发送失败通知
+      run: |
+        echo "❌ Zashboard UI自动更新失败"
+        echo "**时间**: $(date +"%Y-%m-%d %H:%M:%S UTC")"
+        echo "**工作流**: ${{ github.workflow }}"
+        echo "**运行ID**: ${{ github.run_id }}"
+        
+        # 这里可以添加其他通知方式，如邮件、Slack等

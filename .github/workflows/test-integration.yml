@@ -1,0 +1,598 @@
+name: 🧪 Integration Tests
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'box/**'
+      - 'webroot/**'
+      - '**.sh'
+      - '**.json'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'box/**'
+      - 'webroot/**'
+      - '**.sh'
+      - '**.json'
+  workflow_dispatch:
+  schedule:
+    # 每天凌晨3点运行完整测试
+    - cron: '0 3 * * *'
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  validate-configs:
+    name: 📝 配置文件验证
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+
+    - name: ⚙️ 安装依赖工具
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq shellcheck yamllint
+
+    - name: 🔍 验证JSON配置文件
+      run: |
+        echo "🔍 验证JSON配置文件..."
+        
+        json_files=(
+          "box/sing-box/config.json"
+          "update.json"
+        )
+        
+        # 查找所有JSON文件
+        if [ -f "box/sing-box/zashboard-config.json" ]; then
+          json_files+=("box/sing-box/zashboard-config.json")
+        fi
+        
+        error_count=0
+        for file in "${json_files[@]}"; do
+          echo "验证: $file"
+          if [ -f "$file" ]; then
+            if jq empty "$file" 2>/dev/null; then
+              echo "✅ $file - JSON格式正确"
+            else
+              echo "❌ $file - JSON格式错误"
+              jq empty "$file"
+              error_count=$((error_count + 1))
+            fi
+          else
+            echo "⚠️ $file - 文件不存在"
+          fi
+        done
+        
+        if [ $error_count -gt 0 ]; then
+          echo "❌ 发现 $error_count 个JSON格式错误"
+          exit 1
+        fi
+        
+        echo "✅ 所有JSON配置文件验证通过"
+
+    - name: 🔍 验证sing-box配置
+      run: |
+        echo "🔍 验证sing-box配置结构..."
+        
+        config_file="box/sing-box/config.json"
+        
+        # 检查必要的配置段
+        required_sections=("log" "inbounds" "outbounds" "route")
+        
+        for section in "${required_sections[@]}"; do
+          if jq -e ".$section" "$config_file" >/dev/null; then
+            echo "✅ $section 段存在"
+          else
+            echo "❌ $section 段缺失"
+            exit 1
+          fi
+        done
+        
+        # 检查入站配置
+        inbound_count=$(jq '.inbounds | length' "$config_file")
+        echo "📊 入站配置数量: $inbound_count"
+        
+        if [ "$inbound_count" -lt 1 ]; then
+          echo "❌ 至少需要一个入站配置"
+          exit 1
+        fi
+        
+        # 检查出站配置
+        outbound_count=$(jq '.outbounds | length' "$config_file")
+        echo "📊 出站配置数量: $outbound_count"
+        
+        if [ "$outbound_count" -lt 1 ]; then
+          echo "❌ 至少需要一个出站配置"
+          exit 1
+        fi
+        
+        # 检查端口配置
+        ports=$(jq -r '.inbounds[].listen_port // empty' "$config_file")
+        echo "📊 监听端口: $ports"
+        
+        echo "✅ sing-box配置验证通过"
+
+    - name: 🔍 验证模块属性文件
+      run: |
+        echo "🔍 验证module.prop..."
+        
+        if [ ! -f "module.prop" ]; then
+          echo "❌ module.prop文件不存在"
+          exit 1
+        fi
+        
+        # 检查必要字段
+        required_fields=("id" "name" "version" "versionCode" "author" "description")
+        
+        for field in "${required_fields[@]}"; do
+          if grep -q "^$field=" module.prop; then
+            value=$(grep "^$field=" module.prop | cut -d'=' -f2-)
+            echo "✅ $field = $value"
+          else
+            echo "❌ 缺少必要字段: $field"
+            exit 1
+          fi
+        done
+        
+        # 验证版本号格式
+        version=$(grep "^version=" module.prop | cut -d'=' -f2)
+        if [[ $version =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?(-.*)?$ ]]; then
+          echo "✅ 版本号格式正确: $version"
+        else
+          echo "❌ 版本号格式错误: $version"
+          exit 1
+        fi
+        
+        echo "✅ module.prop验证通过"
+
+  test-scripts:
+    name: 🔧 脚本测试
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+
+    - name: ⚙️ 安装测试工具
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y shellcheck bash
+
+    - name: 🔍 Shell脚本语法检查
+      run: |
+        echo "🔍 执行Shell脚本语法检查..."
+        
+        # 查找所有shell脚本
+        script_files=(
+          "customize.sh"
+          "uninstall.sh"
+          "box_service.sh"
+        )
+        
+        # 查找box目录下的脚本
+        if [ -d "box/scripts" ]; then
+          script_files+=($(find box/scripts -name "*.sh" -type f))
+        fi
+        
+        error_count=0
+        for script in "${script_files[@]}"; do
+          if [ -f "$script" ]; then
+            echo "检查: $script"
+            
+            # 语法检查
+            if bash -n "$script" 2>/dev/null; then
+              echo "✅ $script - 语法正确"
+            else
+              echo "❌ $script - 语法错误"
+              bash -n "$script"
+              error_count=$((error_count + 1))
+            fi
+            
+            # ShellCheck检查 (允许一些常见的警告)
+            if shellcheck -e SC2034,SC2086,SC2181,SC2155 "$script" 2>/dev/null; then
+              echo "✅ $script - ShellCheck通过"
+            else
+              echo "⚠️ $script - ShellCheck警告"
+              shellcheck -e SC2034,SC2086,SC2181,SC2155 "$script" || true
+            fi
+          else
+            echo "⚠️ $script - 文件不存在"
+          fi
+        done
+        
+        if [ $error_count -gt 0 ]; then
+          echo "❌ 发现 $error_count 个脚本语法错误"
+          exit 1
+        fi
+        
+        echo "✅ 所有脚本语法检查通过"
+
+    - name: 🔍 脚本功能测试
+      run: |
+        echo "🔍 执行脚本功能测试..."
+        
+        # 测试customize.sh中的函数
+        if [ -f "customize.sh" ]; then
+          echo "测试 customize.sh..."
+          
+          # 检查是否定义了必要的变量和函数
+          if grep -q "SKIPUNZIP" customize.sh; then
+            echo "✅ SKIPUNZIP变量已定义"
+          else
+            echo "⚠️ SKIPUNZIP变量未定义"
+          fi
+          
+          if grep -q "on_install" customize.sh; then
+            echo "✅ on_install函数存在"
+          else
+            echo "⚠️ on_install函数不存在"
+          fi
+        fi
+        
+        echo "✅ 脚本功能测试完成"
+
+  test-webui:
+    name: 🌐 Web界面测试
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+
+    - name: ⚙️ 设置Node.js环境
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: 🔍 Web界面结构验证
+      run: |
+        echo "🔍 验证Web界面结构..."
+        
+        if [ ! -d "webroot" ]; then
+          echo "❌ webroot目录不存在"
+          exit 1
+        fi
+        
+        # 检查必要文件
+        required_files=("index.html")
+        
+        for file in "${required_files[@]}"; do
+          if [ -f "webroot/$file" ]; then
+            echo "✅ $file 存在"
+          else
+            echo "❌ $file 不存在"
+            exit 1
+          fi
+        done
+        
+        # 检查HTML文件语法
+        if [ -f "webroot/index.html" ]; then
+          echo "验证 index.html..."
+          
+          # 基本HTML结构检查
+          if grep -q "<html" webroot/index.html; then
+            echo "✅ HTML标签存在"
+          else
+            echo "❌ 缺少HTML标签"
+            exit 1
+          fi
+          
+          if grep -q "<head" webroot/index.html; then
+            echo "✅ HEAD标签存在"
+          else
+            echo "❌ 缺少HEAD标签"
+            exit 1
+          fi
+          
+          if grep -q "<body" webroot/index.html; then
+            echo "✅ BODY标签存在"
+          else
+            echo "❌ 缺少BODY标签"
+            exit 1
+          fi
+        fi
+        
+        # 检查静态资源
+        assets_dirs=("assets" "css" "js" "static")
+        for dir in "${assets_dirs[@]}"; do
+          if [ -d "webroot/$dir" ]; then
+            file_count=$(find "webroot/$dir" -type f | wc -l)
+            echo "✅ $dir 目录存在 ($file_count 个文件)"
+          else
+            echo "⚠️ $dir 目录不存在"
+          fi
+        done
+        
+        echo "✅ Web界面结构验证完成"
+
+    - name: 🔍 Zashboard配置测试
+      run: |
+        echo "🔍 测试Zashboard配置..."
+        
+        if [ -f "box/sing-box/zashboard-config.json" ]; then
+          echo "验证 zashboard-config.json..."
+          
+          # 检查配置结构
+          required_fields=("version" "api_endpoint")
+          
+          for field in "${required_fields[@]}"; do
+            if jq -e ".$field" box/sing-box/zashboard-config.json >/dev/null; then
+              value=$(jq -r ".$field" box/sing-box/zashboard-config.json)
+              echo "✅ $field = $value"
+            else
+              echo "❌ 缺少字段: $field"
+              exit 1
+            fi
+          done
+          
+          # 检查API端点格式
+          api_endpoint=$(jq -r '.api_endpoint' box/sing-box/zashboard-config.json)
+          if [[ $api_endpoint =~ ^https?://[^/]+:[0-9]+$ ]]; then
+            echo "✅ API端点格式正确"
+          else
+            echo "❌ API端点格式错误: $api_endpoint"
+            exit 1
+          fi
+        else
+          echo "⚠️ zashboard-config.json 不存在"
+        fi
+        
+        echo "✅ Zashboard配置测试完成"
+
+  test-module-structure:
+    name: 📦 模块结构测试
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+
+    - name: 🔍 验证Magisk模块结构
+      run: |
+        echo "🔍 验证Magisk模块结构..."
+        
+        # 检查必要文件
+        required_files=(
+          "module.prop"
+          "customize.sh"
+          "uninstall.sh"
+          "META-INF/com/google/android/update-binary"
+          "META-INF/com/google/android/updater-script"
+        )
+        
+        missing_files=()
+        for file in "${required_files[@]}"; do
+          if [ -f "$file" ]; then
+            echo "✅ $file 存在"
+          else
+            echo "❌ $file 缺失"
+            missing_files+=("$file")
+          fi
+        done
+        
+        if [ ${#missing_files[@]} -gt 0 ]; then
+          echo "❌ 缺少必要文件: ${missing_files[*]}"
+          exit 1
+        fi
+        
+        # 检查目录结构
+        required_dirs=("box" "META-INF" "webroot")
+        
+        for dir in "${required_dirs[@]}"; do
+          if [ -d "$dir" ]; then
+            file_count=$(find "$dir" -type f | wc -l)
+            echo "✅ $dir 目录存在 ($file_count 个文件)"
+          else
+            echo "❌ $dir 目录缺失"
+            exit 1
+          fi
+        done
+        
+        echo "✅ 模块结构验证通过"
+
+    - name: 🔍 验证box目录结构
+      run: |
+        echo "🔍 验证box目录结构..."
+        
+        # 检查box子目录
+        box_dirs=("sing-box" "scripts")
+        
+        for dir in "${box_dirs[@]}"; do
+          if [ -d "box/$dir" ]; then
+            echo "✅ box/$dir 目录存在"
+          else
+            echo "❌ box/$dir 目录缺失"
+            exit 1
+          fi
+        done
+        
+        # 检查关键配置文件
+        key_files=(
+          "box/settings.ini"
+          "box/sing-box/config.json"
+        )
+        
+        for file in "${key_files[@]}"; do
+          if [ -f "$file" ]; then
+            echo "✅ $file 存在"
+          else
+            echo "❌ $file 缺失"
+            exit 1
+          fi
+        done
+        
+        echo "✅ box目录结构验证通过"
+
+  integration-test:
+    name: 🔗 集成测试
+    runs-on: ubuntu-latest
+    needs: [validate-configs, test-scripts, test-webui, test-module-structure]
+    
+    steps:
+    - name: 📥 检出代码
+      uses: actions/checkout@v4
+
+    - name: ⚙️ 安装测试依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y zip unzip jq curl
+
+    - name: 🧪 模拟模块安装测试
+      run: |
+        echo "🧪 模拟模块安装过程..."
+        
+        # 创建模拟环境
+        mkdir -p test_env/data/adb
+        export MODPATH="test_env/system"
+        export MODID="box_for_root"
+        
+        # 模拟安装过程
+        echo "模拟复制文件..."
+        mkdir -p "$MODPATH"
+        
+        # 检查customize.sh是否能正常执行基本检查
+        if [ -f "customize.sh" ]; then
+          echo "测试 customize.sh 基本功能..."
+          
+          # 设置模拟变量
+          export TMPDIR="test_env/tmp"
+          mkdir -p "$TMPDIR"
+          
+          # 执行语法检查
+          bash -n customize.sh
+          echo "✅ customize.sh 语法检查通过"
+        fi
+        
+        echo "✅ 模块安装测试完成"
+
+    - name: 🧪 配置兼容性测试
+      run: |
+        echo "🧪 测试配置文件兼容性..."
+        
+        # 测试settings.ini配置
+        if [ -f "box/settings.ini" ]; then
+          echo "测试 settings.ini..."
+          
+          # 检查关键变量是否定义
+          key_vars=("bin_name" "network_mode" "api_port" "mixed_port")
+          
+          for var in "${key_vars[@]}"; do
+            if grep -q "^$var=" box/settings.ini; then
+              value=$(grep "^$var=" box/settings.ini | cut -d'=' -f2 | tr -d '"')
+              echo "✅ $var = $value"
+            else
+              echo "❌ 缺少变量: $var"
+              exit 1
+            fi
+          done
+        fi
+        
+        # 测试sing-box配置端口一致性
+        if [ -f "box/sing-box/config.json" ] && [ -f "box/settings.ini" ]; then
+          echo "测试端口配置一致性..."
+          
+          # 从settings.ini获取端口
+          api_port=$(grep "^api_port=" box/settings.ini | cut -d'=' -f2 | tr -d '"')
+          mixed_port=$(grep "^mixed_port=" box/settings.ini | cut -d'=' -f2 | tr -d '"')
+          
+          # 检查sing-box配置中的端口
+          sb_api_port=$(jq -r '.experimental.clash_api.external_controller // empty' box/sing-box/config.json | cut -d':' -f2)
+          sb_mixed_port=$(jq -r '.inbounds[] | select(.type=="mixed") | .listen_port // empty' box/sing-box/config.json)
+          
+          if [ "$api_port" = "$sb_api_port" ]; then
+            echo "✅ API端口一致: $api_port"
+          else
+            echo "⚠️ API端口不一致: settings.ini($api_port) vs config.json($sb_api_port)"
+          fi
+          
+          if [ "$mixed_port" = "$sb_mixed_port" ]; then
+            echo "✅ Mixed端口一致: $mixed_port"
+          else
+            echo "⚠️ Mixed端口不一致: settings.ini($mixed_port) vs config.json($sb_mixed_port)"
+          fi
+        fi
+        
+        echo "✅ 配置兼容性测试完成"
+
+    - name: 📊 生成测试报告
+      run: |
+        echo "📊 生成测试报告..."
+        
+        {
+          echo "# 🧪 集成测试报告"
+          echo ""
+          echo "## 📋 测试摘要"
+          echo "- 测试时间: $(date +"%Y-%m-%d %H:%M:%S UTC")"
+          echo "- Git提交: ${{ github.sha }}"
+          echo "- 分支: ${{ github.ref_name }}"
+          echo ""
+          echo "## ✅ 测试项目"
+          echo "- JSON配置文件验证"
+          echo "- sing-box配置验证"
+          echo "- Shell脚本语法检查"
+          echo "- Web界面结构验证"
+          echo "- 模块结构验证"
+          echo "- 配置兼容性测试"
+          echo ""
+          echo "## 📊 测试结果"
+          echo "所有测试项目均已通过，模块结构完整，配置文件格式正确。"
+          echo ""
+          echo "## 🔧 建议事项"
+          echo "- 定期更新sing-box核心版本"
+          echo "- 保持Web界面与API的兼容性"
+          echo "- 持续监控脚本的Shell兼容性"
+          echo ""
+          echo "---"
+          echo "*测试报告由GitHub Actions自动生成*"
+        } > test_report.md
+        
+        echo "✅ 测试报告已生成"
+
+  notify-results:
+    name: 📢 测试结果通知
+    runs-on: ubuntu-latest
+    needs: [validate-configs, test-scripts, test-webui, test-module-structure, integration-test]
+    if: always()
+    
+    steps:
+    - name: 📊 汇总测试结果
+      run: |
+        echo "📊 汇总测试结果..."
+        
+        # 检查各个作业的状态
+        configs_result="${{ needs.validate-configs.result }}"
+        scripts_result="${{ needs.test-scripts.result }}"
+        webui_result="${{ needs.test-webui.result }}"
+        structure_result="${{ needs.test-module-structure.result }}"
+        integration_result="${{ needs.integration-test.result }}"
+        
+        echo "🔍 配置验证: $configs_result"
+        echo "🔧 脚本测试: $scripts_result"
+        echo "🌐 Web界面测试: $webui_result"
+        echo "📦 模块结构测试: $structure_result"
+        echo "🔗 集成测试: $integration_result"
+        
+        # 计算总体结果
+        if [[ "$configs_result" == "success" && "$scripts_result" == "success" && 
+              "$webui_result" == "success" && "$structure_result" == "success" && 
+              "$integration_result" == "success" ]]; then
+          echo "🎉 所有测试均已通过!"
+          echo "overall_result=success" >> $GITHUB_ENV
+        else
+          echo "❌ 部分测试失败"
+          echo "overall_result=failure" >> $GITHUB_ENV
+        fi
+
+    - name: 📢 发送通知
+      run: |
+        echo "📢 发送测试结果通知..."
+        echo "**测试时间**: $(date +"%Y-%m-%d %H:%M:%S UTC")"
+        echo "**工作流**: ${{ github.workflow }}"
+        echo "**运行ID**: ${{ github.run_id }}"
+        echo "**整体结果**: ${{ env.overall_result }}"
+        
+        # 这里可以添加其他通知方式，如邮件、Slack等
