@@ -89,37 +89,8 @@ check() {
         log Error "$(<"${box_run}/${bin_name}_report.log")" >&2
       fi
       ;;
-    clash)
-      if ${bin_path} -t -d "${box_dir}/clash" -f "${clash_config}" > "${box_run}/${bin_name}_report.log" 2>&1; then
-        log Info "${clash_config} passed"
-      else
-        log Debug "${clash_config}"
-        log Error "$(<"${box_run}/${bin_name}_report.log")" >&2
-      fi
-      ;;
-    xray)
-      export XRAY_LOCATION_ASSET="${box_dir}/xray"
-      if ${bin_path} -test -confdir "${box_dir}/${bin_name}" > "${box_run}/${bin_name}_report.log" 2>&1; then
-        log Info "configuration passed"
-      else
-        echo "$(ls ${box_dir}/${bin_name})"
-        log Error "$(<"${box_run}/${bin_name}_report.log")" >&2
-      fi
-      ;;
-    v2fly)
-      export V2RAY_LOCATION_ASSET="${box_dir}/v2fly"
-      if ${bin_path} test -d "${box_dir}/${bin_name}" > "${box_run}/${bin_name}_report.log" 2>&1; then
-        log Info "configuration passed"
-      else
-        echo "$(ls ${box_dir}/${bin_name})"
-        log Error "$(<"${box_run}/${bin_name}_report.log")" >&2
-      fi
-      ;;
-    hysteria)
-      true
-      ;;
     *)
-      log Error "<${bin_name}> unknown binary."
+      log Error "<${bin_name}> unknown binary. Only sing-box is supported."
       exit 1
       ;;
   esac
@@ -140,21 +111,6 @@ reload() {
   check
 
   case "${bin_name}" in
-    "clash")
-      if [ "${xclash_option}" = "mihomo" ]; then
-        endpoint="http://${ip_port}/configs?force=true"
-      else
-        endpoint="http://${ip_port}/configs"
-      fi
-
-      if ${curl_command} -X PUT -H "Authorization: Bearer ${secret}" "${endpoint}" -d '{"path": "", "payload": ""}' 2>&1; then
-        log Info "${bin_name} config reload success"
-        return 0
-      else
-        log Error "${bin_name} config reload failed !"
-        return 1
-      fi
-      ;;
     "sing-box")
       endpoint="http://${ip_port}/configs?force=true"
       if ${curl_command} -X PUT -H "Authorization: Bearer ${secret}" "${endpoint}" -d '{"path": "", "payload": ""}' 2>&1; then
@@ -165,15 +121,8 @@ reload() {
         return 1
       fi
       ;;
-    "xray"|"v2fly"|"hysteria")
-      if [ -f "${box_pid}" ]; then
-        if kill -0 "$(<"${box_pid}" 2>/dev/null)"; then
-          restart_box
-        fi
-      fi
-      ;;
     *)
-      log warning "${bin_name} not supported using API to reload config."
+      log warning "${bin_name} not supported using API to reload config. Only sing-box is supported."
       return 1
       ;;
   esac
@@ -237,12 +186,6 @@ upgeox() {
   geodata_mode=$(busybox awk '!/^ *#/ && /geodata-mode:*./{print $2}' "${clash_config}")
   [ -z "${geodata_mode}" ] && geodata_mode=false
   case "${bin_name}" in
-    clash)
-      geoip_file="${box_dir}/clash/$(if [[ "${xclash_option}" == "premium" || "${geodata_mode}" == "false" ]]; then echo "Country.mmdb"; else echo "GeoIP.dat"; fi)"
-      geoip_url="https://github.com/$(if [[ "${xclash_option}" == "premium" || "${geodata_mode}" == "false" ]]; then echo "MetaCubeX/meta-rules-dat/raw/release/country-lite.mmdb"; else echo "MetaCubeX/meta-rules-dat/raw/release/geoip-lite.dat"; fi)"
-      geosite_file="${box_dir}/clash/GeoSite.dat"
-      geosite_url="https://github.com/MetaCubeX/meta-rules-dat/raw/release/geosite.dat"
-      ;;
     sing-box)
       geoip_file="${box_dir}/sing-box/geoip.db"
       geoip_url="https://github.com/MetaCubeX/meta-rules-dat/raw/release/geoip-lite.db"
@@ -250,10 +193,8 @@ upgeox() {
       geosite_url="https://github.com/MetaCubeX/meta-rules-dat/raw/release/geosite.db"
       ;;
     *)
-      geoip_file="${box_dir}/${bin_name}/geoip.dat"
-      geoip_url="https://github.com/MetaCubeX/meta-rules-dat/raw/release/geoip-lite.dat"
-      geosite_file="${box_dir}/${bin_name}/geosite.dat"
-      geosite_url="https://github.com/MetaCubeX/meta-rules-dat/raw/release/geosite.dat"
+      log Error "Only sing-box is supported for geo data updates."
+      return 1
       ;;
   esac
   if [ "${update_geo}" = "true" ] && { log Info "daily updates geox" && log Debug "Downloading ${geoip_url}"; } && upfile "${geoip_file}" "${geoip_url}" && { log Debug "Downloading ${geosite_url}" && upfile "${geosite_file}" "${geosite_url}"; }; then
@@ -287,63 +228,12 @@ upsubs() {
   fi
 
   case "${bin_name}" in
-    "clash")
-      # subscription clash
-      if [ -n "${subscription_url_clash}" ]; then
-        if [ "${update_subscription}" = "true" ]; then
-          log Info "daily updates subs"
-          log Debug "Downloading ${update_file_name}"
-          if upfile "${update_file_name}" "${subscription_url_clash}"; then
-            log Info "${update_file_name} saved"
-            # If there is a yq command, extract the proxy information from the yml and output it to the clash_provide_config file
-            if [ "${enhanced}" = "true" ]; then
-              if ${yq} 'has("proxies")' "${update_file_name}" | grep -q "true"; then
-                ${yq} '.proxies' "${update_file_name}" >/dev/null 2>&1
-                ${yq} '.proxies' "${update_file_name}" > "${clash_provide_config}"
-                ${yq} -i '{"proxies": .}' "${clash_provide_config}"
-
-                if [ "${custom_rules_subs}" = "true" ]; then
-                  if ${yq} '.rules' "${update_file_name}" >/dev/null 2>&1; then
-
-                    ${yq} '.rules' "${update_file_name}" > "${clash_provide_rules}"
-                    ${yq} -i '{"rules": .}' "${clash_provide_rules}"
-                    ${yq} -i 'del(.rules)' "${clash_config}"
-
-                    cat "${clash_provide_rules}" >> "${clash_config}"
-                  fi
-                fi
-                log Info "subscription success"
-                log Info "Update subscription $(date +"%F %R")"
-                if [ -f "${update_file_name}.bak" ]; then
-                  rm "${update_file_name}.bak"
-                fi
-              elif ${yq} '.. | select(tag == "!!str")' "${update_file_name}" | grep -qE "vless://|vmess://|ss://|hysteria://|trojan://"; then
-                mv "${update_file_name}" "${clash_provide_config}"
-              else
-                log Error "${update_file_name} update subscription failed"
-                return 1
-              fi
-            fi
-            return 0
-          else
-            log Error "update subscription failed"
-            return 1
-          fi
-        else
-          log Warning "update subscription: $update_subscription"
-          return 1
-        fi
-      else
-        log Warning "${bin_name} subscription url is empty..."
-        return 0
-      fi
-      ;;
-    "xray"|"v2fly"|"sing-box"|"hysteria")
-      log Warning "${bin_name} does not support subscriptions.."
+    "sing-box")
+      log Warning "${bin_name} does not support subscriptions."
       return 1
       ;;
     *)
-      log Error "<${bin_name}> unknown binary."
+      log Error "<${bin_name}> unknown binary. Only sing-box is supported."
       return 1
       ;;
   esac
@@ -388,83 +278,8 @@ upkernel() {
       log Debug "download ${download_link}"
       upfile "${box_dir}/${file_kernel}.tar.gz" "${download_link}" && xkernel
       ;;
-    "clash")
-      # if mihomo flag is false, download clash premium/dev
-      if [ "${xclash_option}" = "mihomo" ]; then
-        # set download link
-        download_link="https://github.com/MetaCubeX/mihomo/releases"
-
-        if [ "${mihomo_stable}" = "enable" ]; then
-          latest_version=$($rev1 "https://api.github.com/repos/MetaCubeX/mihomo/releases" | grep "tag_name" | busybox grep -oE "v[0-9.]*" | head -1)
-          tag="$latest_version"
-        else
-          if [ "$use_ghproxy" == true ]; then
-            download_link="${url_ghproxy}/${download_link}"
-          fi
-          tag="Prerelease-Alpha"
-          latest_version=$($rev1 "${download_link}/expanded_assets/${tag}" | busybox grep -oE "alpha-[0-9a-z]+" | head -1)
-        fi
-        # set the filename based on platform and architecture
-        filename="mihomo-${platform}-${arch}-${latest_version}"
-        # download and update the file
-        log Debug "download ${download_link}/download/${tag}/${filename}.gz"
-        upfile "${box_dir}/${file_kernel}.gz" "${download_link}/download/${tag}/${filename}.gz" && xkernel
-      else
-        log Warning "clash.${xclash_option} Repository has been deleted"
-        # filename=$($rev1 "https://github.com/Dreamacro/clash/releases/expanded_assets/premium" | busybox grep -oE "clash-linux-${arch}-[0-9]+.[0-9]+.[0-9]+" | head -1)
-        # log Debug "download https://github.com/Dreamacro/clash/releases/download/premium/${filename}.gz"
-        # upfile "${box_dir}/${file_kernel}.gz" "https://github.com/Dreamacro/clash/releases/download/premium/${filename}.gz" && xkernel
-      fi
-      ;;
-    "xray"|"v2fly")
-      [ "${bin_name}" = "xray" ] && bin='Xray' || bin='v2ray'
-      api_url="https://api.github.com/repos/$(if [ "${bin_name}" = "xray" ]; then echo "XTLS/Xray-core/releases"; else echo "v2fly/v2ray-core/releases"; fi)"
-      # set download link and get the latest version
-      latest_version=$($rev1 ${api_url} | grep "tag_name" | busybox grep -oE "v[0-9.]*" | head -1)
-
-      case $(uname -m) in
-        "i386") download_file="$bin-linux-32.zip" ;;
-        "x86_64") download_file="$bin-linux-64.zip" ;;
-        "armv7l"|"armv8l") download_file="$bin-linux-arm32-v7a.zip" ;;
-        "aarch64") download_file="$bin-android-arm64-v8a.zip" ;;
-        *) log Error "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
-      esac
-      # Do anything else below
-      download_link="https://github.com/$(if [ "${bin_name}" = "xray" ]; then echo "XTLS/Xray-core/releases"; else echo "v2fly/v2ray-core/releases"; fi)"
-      log Debug "Downloading ${download_link}/download/${latest_version}/${download_file}"
-      upfile "${box_dir}/${file_kernel}.zip" "${download_link}/download/${latest_version}/${download_file}" && xkernel
-      ;;
-    "hysteria")
-      local arch
-      case $(uname -m) in
-        "aarch64") arch="arm64" ;;
-        "armv7l" | "armv8l") arch="armv7" ;;
-        "i686") arch="386" ;;
-        "x86_64") arch="amd64" ;;
-        *)
-          log Warning "Unsupported architecture: $(uname -m)"
-          return 1
-          ;;
-      esac
-
-      # Create backup directory if it doesn't exist
-      mkdir -p "${bin_dir}/backup"
-
-      # Backup existing Hysteria binary if it exists
-      if [ -f "${bin_dir}/hysteria" ]; then
-        cp "${bin_dir}/hysteria" "${bin_dir}/backup/hysteria.bak" >/dev/null 2>&1
-      fi
-
-      # Fetch the latest version of Hysteria from GitHub releases
-      local latest_version=$($rev1 "https://api.github.com/repos/apernet/hysteria/releases" | grep "tag_name" | grep -oE "[0-9.].*" | head -1 | sed 's/,//g' | cut -d '"' -f 1)
-
-      local download_link="https://github.com/apernet/hysteria/releases/download/app%2Fv${latest_version}/hysteria-android-${arch}"
-
-      log Debug "Downloading ${download_link}"
-      upfile "${bin_dir}/hysteria" "${download_link}" && xkernel
-      ;;
     *)
-      log Error "<${bin_name}> unknown binary."
+      log Error "<${bin_name}> unknown binary. Only sing-box is supported."
       exit 1
       ;;
   esac
@@ -473,25 +288,6 @@ upkernel() {
 # Check and update kernel
 xkernel() {
   case "${bin_name}" in
-    "clash")
-      gunzip_command="gunzip"
-      if ! command -v gunzip >/dev/null 2>&1; then
-        gunzip_command="busybox gunzip"
-      fi
-
-      mkdir -p "${bin_dir}/xclash"
-      if ${gunzip_command} "${box_dir}/${file_kernel}.gz" >&2 && mv "${box_dir}/${file_kernel}" "${bin_dir}/xclash/${xclash_option}"; then
-        ln -sf "${bin_dir}/xclash/${xclash_option}" "${bin_dir}/${bin_name}"
-
-        if [ -f "${box_pid}" ]; then
-          restart_box
-        else
-          log Debug "${bin_name} does not need to be restarted."
-        fi
-      else
-        log Error "Failed to extract or move the kernel."
-      fi
-      ;;
     "sing-box")
       tar_command="tar"
       if ! command -v tar >/dev/null 2>&1; then
@@ -511,41 +307,8 @@ xkernel() {
       [ -d "${bin_dir}/sing-box-${latest_version#v}-${platform}-${arch}" ] && \
         rm -r "${bin_dir}/sing-box-${latest_version#v}-${platform}-${arch}"
       ;;
-    "v2fly"|"xray")
-      bin="xray"
-      if [ "${bin_name}" != "xray" ]; then
-        bin="v2ray"
-      fi
-      unzip_command="unzip"
-      if ! command -v unzip >/dev/null 2>&1; then
-        unzip_command="busybox unzip"
-      fi
-
-      mkdir -p "${bin_dir}/update"
-      if ${unzip_command} -o "${box_dir}/${file_kernel}.zip" "${bin}" -d "${bin_dir}/update" >&2; then
-        if mv "${bin_dir}/update/${bin}" "${bin_dir}/${bin_name}"; then
-          if [ -f "${box_pid}" ]; then
-            restart_box
-          else
-            log Debug "${bin_name} does not need to be restarted."
-          fi
-        else
-          log Error "Failed to move the kernel."
-        fi
-      else
-        log Error "Failed to extract ${box_dir}/${file_kernel}.zip."
-      fi
-      rm -rf "${bin_dir}/update"
-      ;;
-    "hysteria")
-      if [ -f "${box_pid}" ]; then
-        restart_box
-      else
-        log Debug "${bin_name} does not need to be restarted."
-      fi
-      ;;
     *)
-      log Error "<${bin_name}> unknown binary."
+      log Error "<${bin_name}> unknown binary. Only sing-box is supported."
       exit 1
       ;;
   esac
@@ -559,7 +322,7 @@ xkernel() {
 upxui() {
   # su -c /data/adb/box/scripts/box.tool upxui
   xdashboard="${bin_name}/dashboard"
-  if [[ "${bin_name}" == @(clash|sing-box) ]]; then
+  if [[ "${bin_name}" == "sing-box" ]]; then
     file_dashboard="${box_dir}/${xdashboard}.zip"
     url="https://github.com/CHIZI-0618/yacd/archive/refs/heads/gh-pages.zip"
     if [ "$use_ghproxy" == true ]; then
@@ -764,7 +527,7 @@ secret=""
 webroot() {
 path_webroot="/data/adb/modules/box_for_root/webroot/index.html"
 touch -n > $path_webroot
-  if [[ "${bin_name}" = @(clash|sing-box) ]]; then
+  if [[ "${bin_name}" = "sing-box" ]]; then
     echo -e '
   <!DOCTYPE html>
   <script>
@@ -872,7 +635,7 @@ case "$1" in
       upgeox
     else
       upsubs
-      [ "${bin_name}" != "clash" ] && exit 1
+      [ "${bin_name}" != "sing-box" ] && exit 1
     fi
     if [ -f "${box_pid}" ]; then
       kill -0 "$(<"${box_pid}" 2>/dev/null)" && reload
