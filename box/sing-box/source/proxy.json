@@ -1,0 +1,86 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "google.com",
+        "googleapis.com",
+        "googleusercontent.com",
+        "gstatic.com",
+        "youtube.com",
+        "ytimg.com",
+        "youtu.be",
+        "googlevideo.com",
+        "googletagmanager.com",
+        "googleadservices.com",
+        "googlesyndication.com",
+        "doubleclick.net"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "facebook.com",
+        "fb.com",
+        "fbcdn.net",
+        "instagram.com",
+        "whatsapp.com",
+        "whatsapp.net"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "twitter.com",
+        "twimg.com",
+        "t.co",
+        "x.com"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "github.com",
+        "githubusercontent.com",
+        "githubassets.com",
+        "github.io"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "telegram.org",
+        "telegram.me",
+        "telegra.ph",
+        "t.me"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "netflix.com",
+        "nflxext.com",
+        "nflximg.net",
+        "nflxso.net",
+        "nflxvideo.net"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "openai.com",
+        "chatgpt.com",
+        "anthropic.com",
+        "claude.ai"
+      ]
+    },
+    {
+      "domain_keyword": [
+        "google",
+        "youtube",
+        "facebook",
+        "twitter",
+        "instagram",
+        "github",
+        "telegram",
+        "netflix",
+        "openai",
+        "chatgpt"
+      ]
+    }
+  ]
+}

@@ -556,6 +556,180 @@ chmod +x /data/adb/box/scripts/custom.sh
 - [sing-box for Android](https://github.com/SagerNet/sing-box-for-android)
 - [v2rayNG](https://github.com/2dust/v2rayNG)
 
+## 📋 规则集文件说明
+
+### 规则集文件结构
+
+本项目在 `box/sing-box/source/` 目录下提供了完整的规则集文件，用于解决 sing-box 运行时可能出现的规则集文件缺失问题：
+
+```
+box/sing-box/source/
+├── direct.json     # 直连规则集
+├── proxy.json      # 代理规则集
+├── reject.json     # 拒绝/广告屏蔽规则集
+├── cn.json         # 中国大陆网站规则集
+└── streaming.json  # 流媒体规则集
+```
+
+### 规则集文件详解
+
+#### 1. direct.json - 直连规则集
+包含需要直接连接的域名和 IP 范围：
+- **中国域名**：`.cn`, `.中国`, `.中國` 等顶级域名
+- **本地网络**：私有 IP 地址段和本地回环地址
+- **Apple 服务**：Apple 相关域名，确保系统服务正常
+- **关键词匹配**：包含 "china", "baidu", "qq" 等关键词的域名
+
+#### 2. proxy.json - 代理规则集
+包含需要通过代理访问的国外网站：
+- **Google 服务**：Google 搜索、YouTube、Gmail 等
+- **社交媒体**：Facebook, Twitter, Instagram 等
+- **开发工具**：GitHub, GitLab 等
+- **AI 服务**：OpenAI, Claude 等
+
+#### 3. reject.json - 广告屏蔽规则集
+包含广告、追踪器和分析服务：
+- **广告服务**：Google Ads, DoubleClick 等
+- **分析追踪**：Google Analytics, 百度统计等
+- **移动广告**：友盟、极光推送等移动端广告SDK
+- **正则匹配**：匹配包含 "ads", "analytics" 等关键词的 URL
+
+#### 4. cn.json - 中国大陆规则集
+专门针对中国大陆网站的规则集：
+- **主流网站**：百度、腾讯、阿里巴巴等
+- **视频平台**：哔哩哔哩、爱奇艺、优酷等
+- **电商平台**：淘宝、京东、美团等
+- **IP 段**：中国大陆主要 IP 地址段
+
+#### 5. streaming.json - 流媒体规则集
+包含主流流媒体平台：
+- **视频平台**：Netflix, YouTube, Disney+ 等
+- **音频平台**：Spotify, Apple Music 等
+- **直播平台**：Twitch 等
+- **动漫平台**：Crunchyroll 等
+
+### 配置文件集成
+
+规则集文件已自动集成到 [`config.json`](config.json:1) 中：
+
+```json
+{
+  "route": {
+    "rule_set": [
+      {
+        "tag": "direct-list",
+        "type": "local",
+        "format": "source",
+        "path": "source/direct.json"
+      },
+      {
+        "tag": "proxy-list",
+        "type": "local",
+        "format": "source",
+        "path": "source/proxy.json"
+      }
+      // ... 其他规则集
+    ],
+    "rules": [
+      {
+        "rule_set": "reject-list",
+        "action": "reject"
+      },
+      {
+        "rule_set": ["direct-list", "cn-list"],
+        "action": "direct"
+      },
+      {
+        "rule_set": ["proxy-list", "streaming-list"],
+        "action": "route",
+        "outbound": "SING-BOX"
+      }
+    ]
+  }
+}
+```
+
+### 自定义规则集
+
+#### 添加自定义规则
+您可以根据需要修改规则集文件：
+
+```bash
+# 编辑直连规则集
+vi /data/adb/box/sing-box/source/direct.json
+
+# 编辑代理规则集
+vi /data/adb/box/sing-box/source/proxy.json
+```
+
+#### 规则集格式示例
+```json
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "example.com",
+        "test.org"
+      ]
+    },
+    {
+      "domain_keyword": [
+        "keyword1",
+        "keyword2"
+      ]
+    },
+    {
+      "ip_cidr": [
+        "10.0.0.0/8",
+        "192.168.0.0/16"
+      ]
+    }
+  ]
+}
+```
+
+### 故障排除
+
+#### 规则集文件相关错误
+如果遇到 `open /data/adb/box/sing-box/source/direct.json: no such file or directory` 错误：
+
+1. **检查文件是否存在**：
+```bash
+ls -la /data/adb/box/sing-box/source/
+```
+
+2. **重新安装模块**：
+```bash
+# 重新安装模块会自动创建规则集文件
+```
+
+3. **手动创建文件**：
+```bash
+# 确保目录存在
+mkdir -p /data/adb/box/sing-box/source/
+
+# 从模块目录复制文件
+cp /data/adb/modules/box_for_root/box/sing-box/source/* /data/adb/box/sing-box/source/
+```
+
+4. **检查文件权限**：
+```bash
+# 设置正确的权限
+chown -R root:root /data/adb/box/sing-box/source/
+chmod 644 /data/adb/box/sing-box/source/*.json
+```
+
+#### 规则集更新
+规则集文件支持动态更新，无需重启服务：
+
+```bash
+# 重载配置文件
+su -c "/data/adb/box/scripts/box.service restart"
+
+# 或通过 Web 界面重载配置
+```
+
 ---
 
 > **注意**：本分支专门为 sing-box 核心优化，已移除对其他代理核心的支持。如需使用其他核心，请切换到主分支。

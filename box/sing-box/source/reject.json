@@ -1,0 +1,71 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "doubleclick.net",
+        "googleadservices.com",
+        "googlesyndication.com",
+        "googletagservices.com",
+        "google-analytics.com",
+        "adsystem.amazon.com",
+        "amazon-adsystem.com",
+        "ads.yahoo.com",
+        "advertising.com",
+        "adsymptotic.com",
+        "scorecardresearch.com",
+        "adscore.com"
+      ]
+    },
+    {
+      "domain_keyword": [
+        "ads",
+        "adnxs",
+        "adsystem",
+        "advertising",
+        "googleads",
+        "googlesyndication",
+        "doubleclick",
+        "adsymptotic",
+        "adform",
+        "adskeeper",
+        "amazon-adsystem",
+        "analytics",
+        "omniture",
+        "scorecardresearch",
+        "outbrain",
+        "taboola"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "umeng.com",
+        "umengcloud.com",
+        "cnzz.com",
+        "mob.com",
+        "jpush.cn",
+        "jpush.io",
+        "getui.com",
+        "igexin.com"
+      ]
+    },
+    {
+      "domain": [
+        "pingjs.qq.com",
+        "pingma.qq.com",
+        "tajs.qq.com",
+        "stats.g.doubleclick.net",
+        "www.googleadservices.com",
+        "pagead2.googlesyndication.com"
+      ]
+    },
+    {
+      "domain_regex": [
+        "^https?://.*\\/ads?\\/.*$",
+        "^https?://.*\\/advert.*$",
+        "^https?://.*\\/analytics.*$",
+        "^https?://.*\\/tracker.*$"
+      ]
+    }
+  ]
+}

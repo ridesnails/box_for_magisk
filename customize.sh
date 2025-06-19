@@ -77,6 +77,13 @@ else
   mv "$MODPATH/box" /data/adb/
 fi
 
+# Ensure rule-set source directory exists and has proper permissions
+ui_print "- Setting up rule-set source files"
+mkdir -p /data/adb/box/sing-box/source/
+if [ -d "$MODPATH/box/sing-box/source" ]; then
+  cp -rf "$MODPATH/box/sing-box/source/"* /data/adb/box/sing-box/source/ 2>/dev/null || true
+fi
+
 # Directory creation and file extraction
 ui_print "- Create directories"
 mkdir -p /data/adb/box/ /data/adb/box/run/ /data/adb/box/bin/xclash/
@@ -90,9 +97,11 @@ ui_print "- Setting permissions with enhanced compatibility"
 set_perm_recursive $MODPATH 0 0 0755 0644
 set_perm_recursive /data/adb/box/ 0 3005 0755 0644
 set_perm_recursive /data/adb/box/scripts/ 0 3005 0755 0700
+set_perm_recursive /data/adb/box/sing-box/source/ 0 3005 0755 0644
 set_perm ${service_dir}/box_service.sh 0 0 0755
 set_perm $MODPATH/uninstall.sh 0 0 0755
 chmod ugo+x ${service_dir}/box_service.sh $MODPATH/uninstall.sh /data/adb/box/scripts/*
+chmod 644 /data/adb/box/sing-box/source/*.json 2>/dev/null || true
 
 # Enhanced permission settings for different root solutions
 if [ "$KSU" = "true" ]; then
@@ -148,6 +157,19 @@ if [ "${backup_box}" = "true" ]; then
   for dir in clash xray v2fly sing-box hysteria; do
     restore_config "$dir"
   done
+
+  # Restore rule-set source files if they exist in backup but preserve new ones
+  if [ -d "${temp_dir}/sing-box/source" ]; then
+    ui_print "- Merging rule-set source files"
+    # Keep existing rule-set files, only restore if missing
+    for rule_file in "${temp_dir}/sing-box/source"/*.json; do
+      [ -f "$rule_file" ] || continue
+      rule_name=$(basename "$rule_file")
+      if [ ! -f "/data/adb/box/sing-box/source/$rule_name" ]; then
+        cp "$rule_file" "/data/adb/box/sing-box/source/"
+      fi
+    done
+  fi
 
   restore_kernel() {
     kernel_name="$1"

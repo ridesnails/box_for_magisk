@@ -1,0 +1,64 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        ".cn",
+        ".中国",
+        ".中國"
+      ]
+    },
+    {
+      "domain_keyword": [
+        "china",
+        "baidu",
+        "qq",
+        "wechat",
+        "weixin",
+        "taobao",
+        "tmall",
+        "alipay",
+        "zhifu",
+        "douyin",
+        "tiktok"
+      ]
+    },
+    {
+      "domain": [
+        "localhost",
+        "127.0.0.1",
+        "::1"
+      ]
+    },
+    {
+      "ip_cidr": [
+        "10.0.0.0/8",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "224.0.0.0/4",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+        "ff00::/8"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "aaplimg.com",
+        "apple.co",
+        "apple.com",
+        "apple.com.cn",
+        "apple-cloudkit.com",
+        "appstore.com",
+        "cdn-apple.com",
+        "icloud.com",
+        "icloud.com.cn",
+        "icloud-content.com",
+        "me.com",
+        "mzstatic.com"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "netflix.com",
+        "nflxext.com",
+        "nflximg.net",
+        "nflxso.net",
+        "nflxvideo.net",
+        "netflixdnstest0.com",
+        "netflixdnstest1.com",
+        "netflixdnstest2.com",
+        "netflixdnstest3.com",
+        "netflixdnstest4.com",
+        "netflixdnstest5.com",
+        "netflixdnstest6.com",
+        "netflixdnstest7.com",
+        "netflixdnstest8.com",
+        "netflixdnstest9.com"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "youtube.com",
+        "youtu.be",
+        "ytimg.com",
+        "googlevideo.com",
+        "youtube-nocookie.com",
+        "youtubei.googleapis.com",
+        "youtubeeducation.com",
+        "youtubekids.com"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "primevideo.com",
+        "amazon.com",
+        "amazonvideo.com",
+        "amazontrust.com",
+        "amazonprime.com",
+        "media-amazon.com",
+        "amazonaws.com"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "disneyplus.com",
+        "disney-plus.net",
+        "disneystreaming.com",
+        "dssott.com",
+        "bamgrid.com"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "hulu.com",
+        "huluim.com",
+        "hulu.tv",
+        "hulu.us"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "hbo.com",
+        "hbogo.com",
+        "hbonow.com",
+        "hbomax.com",
+        "max.com"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "apple.com",
+        "tv.apple.com",
+        "itunes.com",
+        "apple.co"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "spotify.com",
+        "spoti.fi",
+        "scdn.co",
+        "spotifycdn.com"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "twitch.tv",
+        "twitchcdn.net",
+        "ttvnw.net",
+        "jtvnw.net"
+      ]
+    },
+    {
+      "domain_suffix": [
+        "crunchyroll.com",
+        "vrv.co",
+        "funimation.com",
+        "animelab.com"
+      ]
+    },
+    {
+      "domain_keyword": [
+        "netflix",
+        "primevideo",
+        "disneyplus",
+        "hbomax",
+        "spotify",
+        "twitch",
+        "crunchyroll"
+      ]
+    }
+  ]
+}
