@@ -1,6 +1,9 @@
 name: 🔄 Update sing-box Core
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     # 每天的 02:00 和 14:00 UTC 检查更新 (避免GitHub API限制)
     - cron: '0 2,14 * * *'
