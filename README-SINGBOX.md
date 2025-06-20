@@ -110,7 +110,8 @@ UDP 流量 → TPROXY (MANGLE 表) → 完整支持
 ├── settings.ini                    # 主配置文件
 ├── sing-box/
 │   ├── config.json                 # sing-box 核心配置
-│   ├── zashboard-config.json       # Web 界面配置
+│   ├── zashboard/                  # Zashboard 配置目录
+│   │   └── config.json             # Web 界面配置
 │   └── dashboard/                  # Zashboard 文件
 └── scripts/                        # 管理脚本
     ├── box.service                 # 服务管理

@@ -134,7 +134,7 @@ You can run the following command to get other related operating instructions:
 
 ### 配置文件
 - **sing-box配置**: `/data/adb/box/sing-box/config.json`
-- **Zashboard配置**: `/data/adb/box/sing-box/zashboard-config.json`
+- **Zashboard配置**: `/data/adb/box/zashboard/config.json`
 - **模块设置**: `/data/adb/box/settings.ini`
 
 ## Uninstall

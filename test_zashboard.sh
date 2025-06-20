@@ -188,7 +188,7 @@ fi
 # 10. 配置文件验证
 test_step "配置文件验证..."
 
-ZASHBOARD_CONFIG="/data/adb/box/sing-box/zashboard-config.json"
+ZASHBOARD_CONFIG="/data/adb/box/zashboard/config.json"
 if [ -f "$ZASHBOARD_CONFIG" ]; then
     test_pass "Zashboard 配置文件存在"
 else

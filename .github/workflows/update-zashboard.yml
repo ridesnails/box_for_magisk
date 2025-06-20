@@ -41,8 +41,8 @@ jobs:
       id: check
       run: |
         # 获取当前UI版本信息
-        if [ -f "box/sing-box/zashboard-config.json" ]; then
-          current_version=$(jq -r '.version // "unknown"' box/sing-box/zashboard-config.json 2>/dev/null || echo "unknown")
+        if [ -f "box/zashboard/config.json" ]; then
+          current_version=$(jq -r '.zashboard.version // "unknown"' box/zashboard/config.json 2>/dev/null || echo "unknown")
         else
           current_version="unknown"
         fi
@@ -256,7 +256,7 @@ jobs:
               "connection_stats": true
             },
             "ui_path": "/data/adb/box/webroot"
-          }' > box/sing-box/zashboard-config.json
+          }' > box/zashboard/config.json
         
         # 检查webroot中是否有配置文件需要更新
         if [ -f "webroot/config.js" ]; then
@@ -312,9 +312,9 @@ jobs:
         fi
         
         # 检查配置文件
-        if [ -f "box/sing-box/zashboard-config.json" ]; then
+        if [ -f "box/zashboard/config.json" ]; then
           echo "✅ zashboard配置文件已更新:"
-          cat box/sing-box/zashboard-config.json | jq .
+          cat box/zashboard/config.json | jq .
         else
           echo "❌ zashboard配置文件缺失"
         fi

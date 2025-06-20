@@ -47,8 +47,8 @@ jobs:
         )
         
         # 查找所有JSON文件
-        if [ -f "box/sing-box/zashboard-config.json" ]; then
-          json_files+=("box/sing-box/zashboard-config.json")
+        if [ -f "box/zashboard/config.json" ]; then
+          json_files+=("box/zashboard/config.json")
         fi
         
         error_count=0
@@ -313,15 +313,15 @@ jobs:
       run: |
         echo "🔍 测试Zashboard配置..."
         
-        if [ -f "box/sing-box/zashboard-config.json" ]; then
-          echo "验证 zashboard-config.json..."
-          
+        if [ -f "box/zashboard/config.json" ]; then
+          echo "验证 zashboard config.json..."
+
           # 检查配置结构
           required_fields=("version" "api_endpoint")
           
           for field in "${required_fields[@]}"; do
-            if jq -e ".$field" box/sing-box/zashboard-config.json >/dev/null; then
-              value=$(jq -r ".$field" box/sing-box/zashboard-config.json)
+            if jq -e ".zashboard.$field" box/zashboard/config.json >/dev/null; then
+              value=$(jq -r ".zashboard.$field" box/zashboard/config.json)
               echo "✅ $field = $value"
             else
               echo "❌ 缺少字段: $field"
@@ -330,7 +330,7 @@ jobs:
           done
           
           # 检查API端点格式
-          api_endpoint=$(jq -r '.api_endpoint' box/sing-box/zashboard-config.json)
+          api_endpoint=$(jq -r '.zashboard.api.host + ":" + (.zashboard.api.port | tostring)' box/zashboard/config.json)
           if [[ $api_endpoint =~ ^https?://[^/]+:[0-9]+$ ]]; then
             echo "✅ API端点格式正确"
           else
@@ -338,7 +338,7 @@ jobs:
             exit 1
           fi
         else
-          echo "⚠️ zashboard-config.json 不存在"
+          echo "⚠️ zashboard config.json 不存在"
         fi
         
         echo "✅ Zashboard配置测试完成"

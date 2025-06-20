@@ -188,7 +188,7 @@ jobs:
           exit 1
         fi
         
-        if [ -f "box/sing-box/zashboard-config.json" ] && ! jq empty box/sing-box/zashboard-config.json; then
+        if [ -f "box/zashboard/config.json" ] && ! jq empty box/zashboard/config.json; then
           echo "❌ zashboard配置文件JSON格式无效"
           exit 1
         fi
