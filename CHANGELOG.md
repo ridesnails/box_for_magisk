@@ -4,3 +4,23 @@
 * add allow/ignore list interface name to `ap.list.cfg` file
 
 [Full Changelog](https://github.com/taamarin/box_for_magisk/compare/v1.7.5...v1.8)
+## [v1.11.14] - 2025-06-25
+
+### 🔄 sing-box核心更新
+- 更新版本:  → v1.11.14
+- 更新时间: 2025-06-25 03:17:26 UTC
+- 更新方式: 自动更新
+
+### 📋 sing-box发布说明
+## :memo: Release Notes
+
+* Fixes and improvements
+
+_We are temporarily unable to update sing-box apps on the App Store because the reviewer mistakenly found that we
+violated the rules (TestFlight users are not affected)._
+
+### 🏗️ 架构支持
+- linux-amd64
+- linux-arm64
+- linux-armv7
+
