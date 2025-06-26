@@ -49,14 +49,25 @@ jobs:
       - name: "⚙️ 第二步：生成版本信息"
         id: versioning # 给这个步骤一个ID，方便后续引用它的输出
         run: |
-          # 核心优化点：赋予 sing-box 二进制文件执行权限，否则无法运行
-          echo "🔑 赋予 sing-box 执行权限..."
-          chmod +x box/bin/sing-box
+          # 核心优化点：从 Git commit 消息中提取 sing-box 版本信息
+          # 因为 box/bin/sing-box 是 Android ARM64 版本，无法在 Linux 环境中执行
+          echo "ℹ️ 从 Git commit 消息中获取 sing-box 版本..."
 
-          # 核心优化点：直接执行二进制文件以获取其内部版本号
-          echo "ℹ️ 获取 sing-box 核心版本..."
-          # 执行 version 命令，并使用 awk 提取版本号字符串 (例如 "1.9.0-beta.5")
-          CORE_VERSION=$(./box/bin/sing-box version | awk '{print $3}')
+          # 获取最新的 commit 消息
+          LATEST_COMMIT=$(git log -1 --pretty=format:"%s")
+          echo "📝 最新 commit: $LATEST_COMMIT"
+
+          # 从 commit 消息中提取版本号
+          # 匹配模式: "Update sing-box binary to v1.12.0-beta.28-reF1nd (Android ARM64)"
+          # 提取: "1.12.0-beta.28-reF1nd"
+          if echo "$LATEST_COMMIT" | grep -q "Update sing-box binary to v"; then
+            CORE_VERSION=$(echo "$LATEST_COMMIT" | sed -n 's/.*Update sing-box binary to v\([^ ]*\).*/\1/p')
+            echo "✅ 从 commit 消息中提取到版本: $CORE_VERSION"
+          else
+            # 如果 commit 消息中没有版本信息，使用默认版本
+            CORE_VERSION="unknown"
+            echo "⚠️ 未在 commit 消息中找到版本信息，使用默认版本: $CORE_VERSION"
+          fi
           
           # 获取当前 Git 提交的短哈希值 (前7位)
           echo "ℹ️ 获取 Git Commit Hash..."
