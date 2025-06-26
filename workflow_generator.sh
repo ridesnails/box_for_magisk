@@ -16,10 +16,23 @@ NC='\033[0m' # No Color
 
 # 配置变量
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BOX_DIR="/data/adb/box"
-MODULE_DIR="/data/adb/modules/box_for_root"
-TEMP_DIR="/tmp/box_workflow"
-BUILD_DIR="${SCRIPT_DIR}/build"
+
+# 检测运行环境
+if [ "$GITHUB_ACTIONS" = "true" ]; then
+    # GitHub Actions 环境
+    BOX_DIR="${SCRIPT_DIR}/mock_box"
+    MODULE_DIR="${SCRIPT_DIR}/mock_module"
+    TEMP_DIR="/tmp/box_workflow"
+    BUILD_DIR="${SCRIPT_DIR}/build"
+    IS_GITHUB_ACTIONS=true
+else
+    # Android 设备环境
+    BOX_DIR="/data/adb/box"
+    MODULE_DIR="/data/adb/modules/box_for_root"
+    TEMP_DIR="/tmp/box_workflow"
+    BUILD_DIR="${SCRIPT_DIR}/build"
+    IS_GITHUB_ACTIONS=false
+fi
 
 # 默认配置
 DEFAULT_BIN_NAME="sing-box"
@@ -49,6 +62,13 @@ log() {
         *)       echo -e "${timestamp} - $message" ;;
     esac
 }
+
+# 输出环境检测结果
+if [ "$IS_GITHUB_ACTIONS" = "true" ]; then
+    log "INFO" "检测到 GitHub Actions 环境，使用模拟路径"
+    log "DEBUG" "BOX_DIR: $BOX_DIR"
+    log "DEBUG" "MODULE_DIR: $MODULE_DIR"
+fi
 
 # 检查依赖
 check_dependencies() {
@@ -89,41 +109,75 @@ init_workspace() {
 # 配置默认设置
 configure_default_settings() {
     log "INFO" "配置默认运行模式..."
-    
-    # 备份原始配置
-    if [ -f "${BOX_DIR}/settings.ini" ]; then
-        cp "${BOX_DIR}/settings.ini" "${BOX_DIR}/settings.ini.bak"
-        log "INFO" "已备份原始配置文件"
+
+    if [ "$GITHUB_ACTIONS" = "true" ]; then
+        # GitHub Actions 环境：创建模拟配置文件
+        log "INFO" "GitHub Actions 环境：创建模拟配置文件"
+
+        local settings_file="${BOX_DIR}/settings.ini"
+        cat > "$settings_file" << EOF
+#!/system/bin/sh
+bin_name="${DEFAULT_BIN_NAME}"
+network_mode="${DEFAULT_NETWORK_MODE}"
+ipv6="false"
+box_user_group="root:net_admin"
+tproxy_port="9898"
+redir_port="9797"
+EOF
+
+        local pkg_config="${BOX_DIR}/package.list.cfg"
+        cat > "$pkg_config" << EOF
+mode:${DEFAULT_PROXY_MODE}
+# GitHub Actions 模拟配置
+EOF
+
+    else
+        # Android 设备环境：修改现有配置
+        # 备份原始配置
+        if [ -f "${BOX_DIR}/settings.ini" ]; then
+            cp "${BOX_DIR}/settings.ini" "${BOX_DIR}/settings.ini.bak"
+            log "INFO" "已备份原始配置文件"
+        fi
+
+        # 更新 settings.ini 配置
+        local settings_file="${BOX_DIR}/settings.ini"
+
+        # 设置默认核心为 sing-box
+        sed -i "s/^bin_name=.*/bin_name=\"${DEFAULT_BIN_NAME}\"/" "$settings_file"
+
+        # 设置网络模式为 enhance (增强模式)
+        sed -i "s/^network_mode=.*/network_mode=\"${DEFAULT_NETWORK_MODE}\"/" "$settings_file"
+
+        # 设置透明代理规则为黑名单模式
+        local pkg_config="${BOX_DIR}/package.list.cfg"
+        sed -i "s/^mode:.*/mode:${DEFAULT_PROXY_MODE}/" "$pkg_config"
     fi
-    
-    # 更新 settings.ini 配置
-    local settings_file="${BOX_DIR}/settings.ini"
-    
-    # 设置默认核心为 sing-box
-    sed -i "s/^bin_name=.*/bin_name=\"${DEFAULT_BIN_NAME}\"/" "$settings_file"
-    
-    # 设置网络模式为 enhance (增强模式)
-    sed -i "s/^network_mode=.*/network_mode=\"${DEFAULT_NETWORK_MODE}\"/" "$settings_file"
-    
-    # 设置透明代理规则为黑名单模式
-    local pkg_config="${BOX_DIR}/package.list.cfg"
-    sed -i "s/^mode:.*/mode:${DEFAULT_PROXY_MODE}/" "$pkg_config"
-    
+
     log "INFO" "默认配置设置完成: 核心=${DEFAULT_BIN_NAME}, 网络模式=${DEFAULT_NETWORK_MODE}, 代理模式=${DEFAULT_PROXY_MODE}"
 }
 
 # 下载 sing-box 核心
 download_singbox_core() {
     log "INFO" "检查并下载 sing-box 核心..."
-    
+
     local bin_path="${BOX_DIR}/bin/sing-box"
-    
+
     # 检查核心是否存在
     if [ -f "$bin_path" ]; then
         log "INFO" "sing-box 核心已存在，跳过下载"
         return 0
     fi
-    
+
+    if [ "$GITHUB_ACTIONS" = "true" ]; then
+        # GitHub Actions 环境：创建模拟核心文件
+        log "INFO" "GitHub Actions 环境：创建模拟 sing-box 核心文件"
+        echo "#!/bin/bash" > "$bin_path"
+        echo "echo 'sing-box mock version for GitHub Actions'" >> "$bin_path"
+        chmod +x "$bin_path"
+        log "INFO" "模拟 sing-box 核心创建完成"
+        return 0
+    fi
+
     log "INFO" "本地未找到 sing-box 核心，开始下载 beta 版本..."
     
     # 获取系统架构
@@ -175,26 +229,34 @@ download_singbox_core() {
 # 下载并配置 zashboard UI
 download_zashboard_ui() {
     log "INFO" "下载并配置 zashboard UI..."
-    
+
     local ui_dir="${BOX_DIR}/${DEFAULT_BIN_NAME}/dashboard"
     local temp_ui_file="${TEMP_DIR}/zashboard.zip"
     local zashboard_url="https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
-    
+
     # 清理旧的 UI 文件
     if [ -d "$ui_dir" ]; then
         rm -rf "${ui_dir:?}"/*
         log "INFO" "已清理旧的 UI 文件"
     fi
-    
+
     mkdir -p "$ui_dir"
-    
+
+    if [ "$GITHUB_ACTIONS" = "true" ]; then
+        # GitHub Actions 环境：创建模拟 UI 文件
+        log "INFO" "GitHub Actions 环境：创建模拟 zashboard UI"
+        echo "<html><body><h1>Mock Zashboard UI for GitHub Actions</h1></body></html>" > "$ui_dir/index.html"
+        log "INFO" "模拟 zashboard UI 创建完成"
+        return 0
+    fi
+
     # 下载 zashboard
     log "INFO" "从 GitHub 下载 zashboard..."
     if curl -L -o "$temp_ui_file" "$zashboard_url"; then
         # 解压 UI 文件
         unzip -q "$temp_ui_file" -d "${TEMP_DIR}/ui_extract"
         local extracted_ui_dir="${TEMP_DIR}/ui_extract/zashboard-gh-pages"
-        
+
         if [ -d "$extracted_ui_dir" ]; then
             cp -r "${extracted_ui_dir}"/* "$ui_dir/"
             log "INFO" "zashboard UI 安装完成"
@@ -212,7 +274,14 @@ download_zashboard_ui() {
 update_webroot_config() {
     log "INFO" "更新 webroot 配置..."
 
-    local webroot_file="${MODULE_DIR}/webroot/index.html"
+    if [ "$GITHUB_ACTIONS" = "true" ]; then
+        # GitHub Actions 环境：使用相对路径
+        local webroot_file="webroot/index.html"
+    else
+        # Android 设备环境：使用绝对路径
+        local webroot_file="${MODULE_DIR}/webroot/index.html"
+    fi
+
     mkdir -p "$(dirname "$webroot_file")"
 
     # 创建重定向到 dashboard 的 HTML 文件
@@ -441,12 +510,20 @@ main_workflow() {
                 download_singbox_core
                 ;;
             "clash")
-                log "INFO" "使用现有的 clash 核心下载逻辑"
-                /data/adb/box/scripts/box.tool upkernel
+                if [ "$GITHUB_ACTIONS" = "true" ]; then
+                    log "INFO" "GitHub Actions 环境：跳过 clash 核心下载"
+                else
+                    log "INFO" "使用现有的 clash 核心下载逻辑"
+                    "${BOX_DIR}/scripts/box.tool" upkernel
+                fi
                 ;;
             *)
-                log "INFO" "使用通用核心下载逻辑"
-                /data/adb/box/scripts/box.tool upkernel
+                if [ "$GITHUB_ACTIONS" = "true" ]; then
+                    log "INFO" "GitHub Actions 环境：跳过通用核心下载"
+                else
+                    log "INFO" "使用通用核心下载逻辑"
+                    "${BOX_DIR}/scripts/box.tool" upkernel
+                fi
                 ;;
         esac
     fi
@@ -458,8 +535,12 @@ main_workflow() {
                 download_zashboard_ui
                 ;;
             "yacd"|"metacubexd")
-                log "INFO" "使用现有的 UI 下载逻辑"
-                /data/adb/box/scripts/box.tool upxui
+                if [ "$GITHUB_ACTIONS" = "true" ]; then
+                    log "INFO" "GitHub Actions 环境：跳过 UI 下载"
+                else
+                    log "INFO" "使用现有的 UI 下载逻辑"
+                    "${BOX_DIR}/scripts/box.tool" upxui
+                fi
                 ;;
         esac
     fi
