@@ -2,10 +2,10 @@ name: Build and Push to Telegram
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, simple ]
     tags: [ 'v*' ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, simple ]
   workflow_dispatch:
     inputs:
       core:
