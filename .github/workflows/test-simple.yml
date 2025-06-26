@@ -1,0 +1,44 @@
+name: Test Simple Workflow
+
+on:
+  push:
+    branches: [ simple ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Test basic functionality
+      run: |
+        echo "🧪 测试基本功能..."
+        echo "当前分支: ${{ github.ref_name }}"
+        echo "工作目录内容:"
+        ls -la
+        
+        echo "检查工作流文件:"
+        if [ -f ".github/workflows/build-and-push.yml" ]; then
+          echo "✅ 主工作流文件存在"
+        else
+          echo "❌ 主工作流文件不存在"
+        fi
+        
+        if [ -f ".github/telegram_push.py" ]; then
+          echo "✅ Telegram 推送脚本存在"
+        else
+          echo "❌ Telegram 推送脚本不存在"
+        fi
+        
+        if [ -f "workflow_generator.sh" ]; then
+          echo "✅ 工作流生成器存在"
+          chmod +x workflow_generator.sh
+          ./workflow_generator.sh --help | head -10
+        else
+          echo "❌ 工作流生成器不存在"
+        fi
+        
+        echo "✅ 基本测试完成"

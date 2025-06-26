@@ -194,13 +194,20 @@ jobs:
         retention-days: 30
 
     - name: Push to Telegram Bot
-      if: steps.params.outputs.skip_telegram != 'true' && (secrets.BOT_TOKEN != '' && secrets.CHAT_ID != '')
+      if: steps.params.outputs.skip_telegram != 'true'
       env:
         BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         CHAT_ID: ${{ secrets.CHAT_ID }}
         VERSION: ${{ steps.params.outputs.version }}
       run: |
         echo "📱 推送到 Telegram Bot..."
+
+        # 检查必需的环境变量
+        if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+          echo "⚠️  跳过 Telegram 推送: 未设置 BOT_TOKEN 或 CHAT_ID"
+          echo "请在 GitHub Secrets 中设置 BOT_TOKEN 和 CHAT_ID"
+          exit 0
+        fi
 
         # 设置提交信息
         export COMMIT="$(git log --oneline -n 5 --no-decorate | sed 's/^[0-9a-f]* //' | sed 's/^/— /')"
