@@ -17,15 +17,6 @@ on:
   push:
     branches:
       - simple
-    paths:
-      # 只有当以下核心文件或目录发生变化时，才触发工作流
-      # 这样可以避免修改 README.md 等非功能性文件时也触发构建
-      - 'box/bin/sing-box'      # sing-box 核心二进制文件
-      - 'box/sing-box/**'       # sing-box 配置文件目录
-      - 'box/scripts/**'        # 自定义脚本目录
-      - 'box_service.sh'        # 模块主服务脚本
-      - 'customize.sh'          # Magisk 安装脚本
-      - 'module.prop'           # 模块信息文件
 
 # ===================================================================================
 # 任务 (Jobs)
