@@ -204,7 +204,6 @@ jobs:
       # 步骤 8: 推送到 Telegram Bot
       # -----------------------------------------------------------------------------
       - name: "📱 第八步：推送到 Telegram Bot"
-        if: secrets.BOT_TOKEN != '' && secrets.CHAT_ID != ''
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
