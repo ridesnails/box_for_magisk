@@ -51,12 +51,12 @@ jobs:
         run: |
           # 核心优化点：赋予 sing-box 二进制文件执行权限，否则无法运行
           echo "🔑 赋予 sing-box 执行权限..."
-          chmod +x bin/sing-box
+          chmod +x box/bin/sing-box
 
           # 核心优化点：直接执行二进制文件以获取其内部版本号
           echo "ℹ️ 获取 sing-box 核心版本..."
           # 执行 version 命令，并使用 awk 提取版本号字符串 (例如 "1.9.0-beta.5")
-          CORE_VERSION=$(./bin/sing-box version | awk '{print $3}')
+          CORE_VERSION=$(./box/bin/sing-box version | awk '{print $3}')
           
           # 获取当前 Git 提交的短哈希值 (前7位)
           echo "ℹ️ 获取 Git Commit Hash..."
