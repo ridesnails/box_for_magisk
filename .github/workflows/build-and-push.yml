@@ -1,264 +1,322 @@
-name: Build and Push to Telegram
+# ===================================================================================
+# 工作流名称: 构建与推送
+# ===================================================================================
+name: "📦 构建并推送模块包"
 
+# ===================================================================================
+# 触发条件:
+# 1. 手动触发 (workflow_dispatch)
+# 2. 当 simple 分支有代码推送时触发，但仅限于特定文件或目录发生变化时
+#    - 这涵盖了“upstream有更新”和“sing-box核心有推送更新”两种情况
+# ===================================================================================
 on:
-  push:
-    branches: [ main, master, simple ]
-    tags: [ 'v*' ]
-  pull_request:
-    branches: [ main, master, simple ]
+  # 允许在 GitHub Actions 页面手动触发此工作流
   workflow_dispatch:
-    inputs:
-      core:
-        description: '代理核心选择'
-        required: false
-        default: 'sing-box'
-        type: choice
-        options:
-          - sing-box
-          - clash
-          - xray
-          - v2fly
-          - hysteria
-      network_mode:
-        description: '网络模式'
-        required: false
-        default: 'enhance'
-        type: choice
-        options:
-          - enhance
-          - tproxy
-          - redirect
-          - mixed
-          - tun
-      ui:
-        description: 'UI 界面'
-        required: false
-        default: 'zashboard'
-        type: choice
-        options:
-          - zashboard
-          - yacd
-          - metacubexd
-      skip_telegram:
-        description: '跳过 Telegram 推送'
-        required: false
-        default: false
-        type: boolean
 
+  # 当有代码推送到 simple 分支时触发
+  push:
+    branches:
+      - simple
+    paths:
+      # 只有当以下核心文件或目录发生变化时，才触发工作流
+      # 这样可以避免修改 README.md 等非功能性文件时也触发构建
+      - 'box/bin/sing-box'      # sing-box 核心二进制文件
+      - 'box/sing-box/**'       # sing-box 配置文件目录
+      - 'box/scripts/**'        # 自定义脚本目录
+      - 'box_service.sh'        # 模块主服务脚本
+      - 'customize.sh'          # Magisk 安装脚本
+      - 'module.prop'           # 模块信息文件
+
+# ===================================================================================
+# 任务 (Jobs)
+# ===================================================================================
 jobs:
-  build:
+  # 定义一个唯一的任务，负责所有事情
+  build-and-release:
+    # 任务的显示名称
+    name: "🏗️ 构建并发布模块"
+    # 运行此任务所需的虚拟机环境
     runs-on: ubuntu-latest
-    
+    # 为此任务授予写权限，以便它可以创建 GitHub Release
+    permissions:
+      contents: write
+
+    # 任务的执行步骤
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      # -----------------------------------------------------------------------------
+      # 步骤 1: 检出代码
+      # -----------------------------------------------------------------------------
+      - name: "🚚 第一步：准备代码仓库"
+        uses: actions/checkout@v4
+        with:
+          # 拉取所有 git 历史记录，这对于后续获取 commit hash 是必需的
+          fetch-depth: 0
 
-    - name: Setup environment
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y curl unzip zip python3 python3-pip
-        pip3 install requests
+      # -----------------------------------------------------------------------------
+      # 步骤 2: 准备环境和版本信息
+      # -----------------------------------------------------------------------------
+      - name: "⚙️ 第二步：生成版本信息"
+        id: versioning # 给这个步骤一个ID，方便后续引用它的输出
+        run: |
+          # 核心优化点：赋予 sing-box 二进制文件执行权限，否则无法运行
+          echo "🔑 赋予 sing-box 执行权限..."
+          chmod +x box/bin/sing-box
 
-    - name: Set build parameters
-      id: params
-      run: |
-        # 设置默认参数
-        CORE="${{ github.event.inputs.core || 'sing-box' }}"
-        NETWORK_MODE="${{ github.event.inputs.network_mode || 'enhance' }}"
-        UI="${{ github.event.inputs.ui || 'zashboard' }}"
-        SKIP_TELEGRAM="${{ github.event.inputs.skip_telegram || 'false' }}"
-        
-        echo "core=$CORE" >> $GITHUB_OUTPUT
-        echo "network_mode=$NETWORK_MODE" >> $GITHUB_OUTPUT
-        echo "ui=$UI" >> $GITHUB_OUTPUT
-        echo "skip_telegram=$SKIP_TELEGRAM" >> $GITHUB_OUTPUT
-        
-        # 设置版本信息
-        if [[ $GITHUB_REF == refs/tags/* ]]; then
-          VERSION=${GITHUB_REF#refs/tags/}
-        else
-          VERSION="v$(date +%Y%m%d)-$(git rev-parse --short HEAD)"
-        fi
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        
-        # 设置构建信息
-        echo "build_date=$(date +%Y%m%d)" >> $GITHUB_OUTPUT
-        echo "commit_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          # 核心优化点：直接执行二进制文件以获取其内部版本号
+          echo "ℹ️ 获取 sing-box 核心版本..."
+          # 执行 version 命令，并使用 awk 提取版本号字符串 (例如 "1.9.0-beta.5")
+          CORE_VERSION=$(./box/bin/sing-box version | awk '{print $3}')
+          
+          # 获取当前 Git 提交的短哈希值 (前7位)
+          echo "ℹ️ 获取 Git Commit Hash..."
+          GIT_HASH=$(git rev-parse --short HEAD)
 
-    - name: Update module.prop
-      run: |
-        # 更新版本信息
-        sed -i "s/^version=.*/version=${{ steps.params.outputs.version }}/" module.prop
-        sed -i "s/^versionCode=.*/versionCode=${{ steps.params.outputs.build_date }}/" module.prop
-        
-        # 显示更新后的信息
-        echo "Updated module.prop:"
-        cat module.prop
+          # 组合成最终的模块版本号，格式为：[核心版本]+[commit哈希]
+          FINAL_VERSION="${CORE_VERSION}+${GIT_HASH}"
+          echo "✅ 成功生成版本号: ${FINAL_VERSION}"
 
-    - name: Configure workflow
-      run: |
-        # 设置脚本权限
-        chmod +x workflow_generator.sh
-        
-        # 创建必要的目录
-        mkdir -p build
-        
-        echo "Build configuration:"
-        echo "  Core: ${{ steps.params.outputs.core }}"
-        echo "  Network Mode: ${{ steps.params.outputs.network_mode }}"
-        echo "  UI: ${{ steps.params.outputs.ui }}"
-        echo "  Version: ${{ steps.params.outputs.version }}"
+          # 将版本号和打包文件名设置为环境变量，供后续步骤使用
+          echo "VERSION=${FINAL_VERSION}" >> $GITHUB_ENV
+          echo "FILE_NAME=Box_for_Magisk-simple-${FINAL_VERSION}.zip" >> $GITHUB_ENV
+          
+          # 将版本号设置为此步骤的输出，供 release 步骤使用
+          echo "TAG=${FINAL_VERSION}" >> $GITHUB_OUTPUT
 
-    - name: Build module package
-      run: |
-        # 运行工作流生成器
-        ./workflow_generator.sh \
-          --core "${{ steps.params.outputs.core }}" \
-          --mode "${{ steps.params.outputs.network_mode }}" \
-          --ui "${{ steps.params.outputs.ui }}" \
-          --build-only
-        
-        # 检查生成的文件
-        ls -la build/
-        
-        # 重命名文件包含配置信息
-        cd build
-        for file in *.zip; do
-          if [ -f "$file" ]; then
-            new_name="box_for_root-${{ steps.params.outputs.version }}-${{ steps.params.outputs.core }}-${{ steps.params.outputs.network_mode }}.zip"
-            mv "$file" "$new_name"
-            echo "Generated: $new_name"
-            echo "module_file=$new_name" >> $GITHUB_ENV
-          fi
-        done
+      # -----------------------------------------------------------------------------
+      # 步骤 3: 更新模块信息文件
+      # -----------------------------------------------------------------------------
+      - name: "📝 第三步：更新 module.prop 文件"
+        run: |
+          echo "✍️ 将版本号写入 module.prop..."
+          # 使用 sed 命令将 module.prop 文件中的 version=xxxx 这一行精确替换为我们新生成的版本号
+          sed -i "s/^version=.*/version=${{ env.VERSION }}/" module.prop
+          echo "✅ module.prop 更新完毕！"
+          cat module.prop # 打印出来检查一下
 
-    - name: Generate release notes
-      id: release_notes
-      run: |
-        cat > release_notes.md << EOF
-        # Box for Magisk ${{ steps.params.outputs.version }}
-        
-        ## 📦 构建信息
-        - **版本**: ${{ steps.params.outputs.version }}
-        - **构建日期**: $(date '+%Y-%m-%d %H:%M:%S UTC')
-        - **提交**: ${{ steps.params.outputs.commit_sha }}
-        
-        ## ⚙️ 配置信息
-        - **代理核心**: ${{ steps.params.outputs.core }}
-        - **网络模式**: ${{ steps.params.outputs.network_mode }}
-        - **UI 界面**: ${{ steps.params.outputs.ui }}
-        
-        ## 🚀 默认配置
-        - **透明代理**: 黑名单模式
-        - **IPv6**: 已禁用
-        - **端口配置**: tproxy 9898, redirect 9797
-        
-        ## 📱 安装方法
-        1. 下载模块包
-        2. 通过 Magisk/KernelSU/APatch Manager 安装
-        3. 重启设备
-        4. 访问控制面板: http://127.0.0.1:9090/ui/
-        
-        ## 🔗 相关链接
-        - [GitHub Repository](https://github.com/taamarin/box_for_magisk)
-        - [使用文档](https://github.com/taamarin/box_for_magisk/blob/master/README.md)
-        - [问题反馈](https://t.me/taamarin)
-        
-        #BoxForRoot #Magisk #KernelSU #APatch #${{ steps.params.outputs.core }}
-        EOF
-        
-        # 输出发布说明
-        echo "Generated release notes:"
-        cat release_notes.md
+      # -----------------------------------------------------------------------------
+      # 步骤 4: 应用默认配置修改
+      # -----------------------------------------------------------------------------
+      - name: "⚙️ 第四步：应用默认配置修改"
+        run: |
+          echo "🔧 开始应用默认配置..."
 
-    - name: Create GitHub Release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ steps.params.outputs.version }}
-        name: "Box for Magisk ${{ steps.params.outputs.version }}"
-        body_path: release_notes.md
-        files: build/*.zip
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: box-for-magisk-${{ steps.params.outputs.version }}
-        path: build/*.zip
-        retention-days: 30
-
-    - name: Push to Telegram Bot
-      if: steps.params.outputs.skip_telegram != 'true'
-      env:
-        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-        CHAT_ID: ${{ secrets.CHAT_ID }}
-        VERSION: ${{ steps.params.outputs.version }}
-      run: |
-        echo "📱 推送到 Telegram Bot..."
-
-        # 检查必需的环境变量
-        if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
-          echo "⚠️  跳过 Telegram 推送: 未设置 BOT_TOKEN 或 CHAT_ID"
-          echo "请在 GitHub Secrets 中设置 BOT_TOKEN 和 CHAT_ID"
-          exit 0
-        fi
-
-        # 设置提交信息
-        export COMMIT="$(git log --oneline -n 5 --no-decorate | sed 's/^[0-9a-f]* //' | sed 's/^/— /')"
-
-        # 查找模块文件
-        MODULE_FILE=$(find build -name "*.zip" | head -1)
-
-        if [ -f "$MODULE_FILE" ]; then
-          echo "📦 找到模块文件: $MODULE_FILE"
-
-          # 使用新的推送脚本
-          if [ -f ".github/telegram_push.py" ]; then
-            python3 .github/telegram_push.py "$MODULE_FILE"
-            echo "✅ 成功推送到 Telegram"
-          elif [ -f ".github/taamarinbot.py" ]; then
-            # 备用：使用原有脚本
-            python3 .github/taamarinbot.py "$MODULE_FILE"
-            echo "✅ 成功推送到 Telegram (使用备用脚本)"
+          # 1. 设置默认网络模式为 enhance（增强模式）
+          echo "📡 设置默认网络模式为 enhance..."
+          if [ -f "box/settings.ini" ]; then
+            sed -i 's/^network_mode=.*/network_mode="enhance"/' box/settings.ini
+            echo "✅ 网络模式已设置为 enhance"
           else
-            echo "❌ 未找到 Telegram 推送脚本"
+            echo "⚠️ 未找到 box/settings.ini 文件"
+          fi
+
+          # 2. 设置默认代理核心为 sing-box
+          echo "🎯 设置默认代理核心为 sing-box..."
+          if [ -f "box/settings.ini" ]; then
+            sed -i 's/^bin_name=.*/bin_name="sing-box"/' box/settings.ini
+            echo "✅ 代理核心已设置为 sing-box"
+          fi
+
+          # 3. 设置默认透明代理规则为黑名单模式
+          echo "🚫 设置默认透明代理规则为黑名单模式..."
+          if [ -f "box/package.list.cfg" ]; then
+            sed -i 's/^mode:.*/mode:blacklist/' box/package.list.cfg
+            echo "✅ 透明代理规则已设置为黑名单模式"
+          else
+            echo "⚠️ 未找到 box/package.list.cfg 文件"
+          fi
+
+          # 4. 下载并集成 zashboard UI 替代默认 yacd
+          echo "🎨 下载并集成 zashboard UI..."
+          ZASHBOARD_URL="https://github.com/Zephyruso/zashboard/archive/refs/heads/gh-pages.zip"
+          UI_DIR="box/sing-box/dashboard"
+
+          # 创建 UI 目录
+          mkdir -p "$UI_DIR"
+
+          # 下载 zashboard
+          echo "📥 正在下载 zashboard..."
+          curl -L -o zashboard.zip "$ZASHBOARD_URL"
+
+          # 解压并安装
+          if [ -f "zashboard.zip" ]; then
+            echo "📂 正在解压 zashboard..."
+            unzip -q zashboard.zip
+
+            # 查找解压后的目录
+            ZASHBOARD_DIR=$(find . -name "zashboard-gh-pages" -type d | head -1)
+
+            if [ -d "$ZASHBOARD_DIR" ]; then
+              echo "📋 正在安装 zashboard 到 $UI_DIR..."
+              cp -r "$ZASHBOARD_DIR"/* "$UI_DIR/"
+              echo "✅ zashboard UI 安装完成"
+
+              # 清理临时文件
+              rm -rf zashboard.zip "$ZASHBOARD_DIR"
+            else
+              echo "❌ 未找到 zashboard 解压目录"
+            fi
+          else
+            echo "❌ zashboard 下载失败"
+          fi
+
+          # 5. 显示配置摘要
+          echo ""
+          echo "📋 配置摘要："
+          echo "  🎯 代理核心: sing-box"
+          echo "  📡 网络模式: enhance (增强模式)"
+          echo "  🚫 代理规则: blacklist (黑名单模式)"
+          echo "  🎨 UI 界面: zashboard"
+          echo "✅ 默认配置应用完成！"
+
+      # -----------------------------------------------------------------------------
+      # 步骤 5: 代码质量检查 (优化点)
+      # -----------------------------------------------------------------------------
+      - name: "🧐 第五步：检查脚本语法 (Shellcheck)"
+        run: |
+          echo "🛡️ 开始检查 Shell 脚本语法..."
+          shellcheck box_service.sh customize.sh
+          echo "✅ 语法检查通过！"
+
+      # -----------------------------------------------------------------------------
+      # 步骤 6: 打包模块文件
+      # -----------------------------------------------------------------------------
+      - name: "📦 第六步：打包模块为 ZIP 文件"
+        run: |
+          echo "⚙️ 开始打包..."
+          # 使用 zip 命令打包所有文件
+          # -r 表示递归打包子目录, -9 表示最高压缩率, -q 表示静默模式
+          zip -r9q ${{ env.FILE_NAME }} . -x ".git/*" ".github/*" "README.md"
+          echo "✅ 打包完成: ${{ env.FILE_NAME }}"
+
+      # -----------------------------------------------------------------------------
+      # 步骤 7: 创建 GitHub Release
+      # -----------------------------------------------------------------------------
+      - name: "🚀 第七步：创建 GitHub 预发布版本"
+        uses: softprops/action-gh-release@v1
+        with:
+          # 要上传的附件文件，即我们打包好的 zip 包
+          files: ${{ env.FILE_NAME }}
+          # Release 的标签名，使用我们生成的唯一版本号
+          tag_name: ${{ steps.versioning.outputs.TAG }}
+          # Release 的标题
+          name: "滚动更新 ${{ steps.versioning.outputs.TAG }}"
+          # Release 的正文内容，使用 Markdown 格式
+          body: |
+            自动构建于 `simple` 分支的最新提交。
+            - **sing-box 核心版本:** `${{ env.VERSION }}`
+            - **构建时间:** `$(date -u)`
+            - **提交哈希:** `${{ github.sha }}`
+          # 将此 Release 标记为预发布版本，适合滚动更新
+          prerelease: true
+
+      # -----------------------------------------------------------------------------
+      # 步骤 8: 推送到 Telegram Bot
+      # -----------------------------------------------------------------------------
+      - name: "📱 第八步：推送到 Telegram Bot"
+        if: secrets.BOT_TOKEN != '' && secrets.CHAT_ID != ''
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          VERSION: ${{ env.VERSION }}
+        run: |
+          echo "📱 准备推送到 Telegram Bot..."
+
+          # 检查必需的环境变量
+          if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+            echo "⚠️ 跳过 Telegram 推送: 未设置 BOT_TOKEN 或 CHAT_ID"
+            echo "请在 GitHub Secrets 中设置 BOT_TOKEN 和 CHAT_ID"
+            exit 0
+          fi
+
+          # 安装 Python 依赖
+          pip3 install requests
+
+          # 准备推送信息
+          export COMMIT="$(git log --oneline -n 5 --no-decorate | sed 's/^[0-9a-f]* //' | sed 's/^/— /')"
+
+          # 查找生成的模块文件
+          MODULE_FILE="${{ env.FILE_NAME }}"
+
+          if [ -f "$MODULE_FILE" ]; then
+            echo "📦 找到模块文件: $MODULE_FILE"
+
+            # 创建简化的推送脚本
+            cat > telegram_push.py << 'EOF'
+          #!/usr/bin/env python3
+          import os
+          import sys
+          import requests
+
+          def send_to_telegram(file_path):
+              bot_token = os.environ.get("BOT_TOKEN")
+              chat_id = os.environ.get("CHAT_ID")
+              version = os.environ.get("VERSION", "unknown")
+              commit = os.environ.get("COMMIT", "Manual build")
+
+              # 准备消息
+              caption = f"""
+          {version}
+
+          {commit}
+
+          🔧 默认配置:
+          • 代理核心: sing-box
+          • 网络模式: enhance (增强模式)
+          • 代理规则: blacklist (黑名单模式)
+          • UI 界面: zashboard
+
+          🔗 [GitHub](https://github.com/taamarin/box_for_magisk)
+          📦 [Releases](https://github.com/taamarin/box_for_magisk/releases)
+
+          #BoxForRoot #Magisk #KernelSU #APatch #singbox #enhance #zashboard
+          """.strip()
+
+              # 发送文件
+              url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+
+              with open(file_path, 'rb') as file:
+                  files = {'document': file}
+                  data = {
+                      'chat_id': chat_id,
+                      'caption': caption,
+                      'parse_mode': 'Markdown'
+                  }
+
+                  response = requests.post(url, files=files, data=data, timeout=60)
+
+                  if response.status_code == 200:
+                      result = response.json()
+                      if result.get('ok'):
+                          print("✅ 文件发送成功!")
+                          return True
+                      else:
+                          print(f"❌ 发送失败: {result.get('description', 'Unknown error')}")
+                          return False
+                  else:
+                      print(f"❌ HTTP 错误 {response.status_code}: {response.text}")
+                      return False
+
+          if __name__ == "__main__":
+              if len(sys.argv) < 2:
+                  print("❌ 请提供文件路径")
+                  sys.exit(1)
+
+              file_path = sys.argv[1]
+              if not os.path.isfile(file_path):
+                  print(f"❌ 文件不存在: {file_path}")
+                  sys.exit(1)
+
+              if send_to_telegram(file_path):
+                  print("🎉 Telegram 推送完成!")
+              else:
+                  print("❌ Telegram 推送失败!")
+                  sys.exit(1)
+          EOF
+
+            # 执行推送
+            python3 telegram_push.py "$MODULE_FILE"
+            echo "✅ Telegram 推送完成"
+          else
+            echo "❌ 未找到模块文件: $MODULE_FILE"
             exit 1
           fi
-        else
-          echo "❌ 未找到模块文件"
-          exit 1
-        fi
-
-    - name: Cleanup
-      if: always()
-      run: |
-        # 清理临时文件
-        rm -rf /tmp/box_workflow* || true
-        echo "✅ 清理完成"
-
-    - name: Build Summary
-      if: always()
-      run: |
-        echo "## 🎯 构建摘要" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| 项目 | 值 |" >> $GITHUB_STEP_SUMMARY
-        echo "|------|-----|" >> $GITHUB_STEP_SUMMARY
-        echo "| 版本 | ${{ steps.params.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| 核心 | ${{ steps.params.outputs.core }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| 网络模式 | ${{ steps.params.outputs.network_mode }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| UI | ${{ steps.params.outputs.ui }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| 构建状态 | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if [ -f "build/*.zip" ]; then
-          echo "### 📦 生成的文件" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          ls -la build/ >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-        fi

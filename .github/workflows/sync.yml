@@ -1,0 +1,116 @@
+# .github/workflows/sync.yml
+# 工作流名称
+name: 核心与代码同步
+
+# 工作流触发条件
+on:
+  # 允许在 GitHub Actions 页面手动触发此工作流
+  workflow_dispatch:
+  # 定时触发，使用 cron 语法，设置为每天凌晨 3 点执行
+  schedule:
+    - cron: '0 3 * * *'
+
+# 定义一系列任务
+jobs:
+  # 第一个任务：同步上游主分支的代码
+  sync-upstream:
+    # 任务名称（中文）
+    name: 同步上游代码
+    # 运行此任务的虚拟机环境
+    runs-on: ubuntu-latest
+    # 任务步骤
+    steps:
+      # 步骤 1: 拉取 simple 分支的代码
+      - name: 检出 simple 分支代码
+        uses: actions/checkout@v4
+        with:
+          # 指定要操作的分支是 simple
+          ref: simple
+          # 拉取所有 git 历史，这对于 rebase 是必需的
+          fetch-depth: 0
+
+      # 步骤 2: 设置 Git 用户信息
+      - name: 配置 Git 用户
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'github-actions@github.com'
+
+      # 步骤 3: 执行同步操作
+      - name: 从上游主分支 rebase 代码
+        run: |
+          # 添加上游仓库地址，命名为 upstream
+          # 请将 "your-repo/box_for_magisk.git" 替换为你的上游仓库地址
+          git remote add upstream https://github.com/your-repo/box_for_magisk.git
+          # 从上游仓库拉取最新的代码信息
+          git fetch upstream
+          # 执行 rebase 操作，将 simple 分支的提交应用到上游 main 分支的最新版本上
+          # 如果遇到冲突，此步骤会失败，需要手动解决
+          git rebase upstream/main
+          # 强制推送 rebase 后的历史到 simple 分支
+          # --force-with-lease 比 --force 更安全，能防止覆盖掉别人在你拉取之后推送的新提交
+          git push origin simple --force-with-lease
+
+  # 第二个任务：更新 sing-box 核心
+  update-sing-box-core:
+    # 任务名称（中文）
+    name: 更新 sing-box 核心
+    # 运行此任务的虚拟机环境
+    runs-on: ubuntu-latest
+    # 设置依赖关系，表示此任务必须在 sync-upstream 任务成功完成后才能开始
+    needs: sync-upstream
+    # 任务步骤
+    steps:
+      # 步骤 1: 拉取 simple 分支的代码
+      - name: 检出 simple 分支代码
+        uses: actions/checkout@v4
+        with:
+          ref: simple
+
+      # 步骤 2: 获取当前模块内的 sing-box 版本号
+      - name: 获取当前核心版本
+        id: get_current_version
+        # 从 module.prop 文件中提取版本号
+        # 使用 grep 和 cut 精准定位版本号字符串
+        run: echo "version=$(grep 'version=' module.prop | cut -d'=' -f2 | cut -d'+' -f1)" >> $GITHUB_OUTPUT
+
+      # 步骤 3: 获取最新的 sing-box release 版本号
+      - name: 获取最新核心版本
+        id: get_latest_version
+        run: |
+          # 使用 curl 访问 GitHub API，获取 SagerNet/sing-box 的最新 release 信息
+          # 使用 jq 工具解析 JSON，提取 tag_name (即版本号)，并去除前缀 'v'
+          latest_tag=$(curl -s "https://api.github.com/repos/SagerNet/sing-box/releases/latest" | jq -r .tag_name | sed 's/^v//')
+          echo "version=$latest_tag" >> $GITHUB_OUTPUT
+
+      # 步骤 4: 比较版本号并执行更新
+      - name: 比较版本并下载更新
+        # 使用 if 条件判断，只有在最新版本号与当前版本号不一致时才执行此步骤
+        if: steps.get_latest_version.outputs.version != steps.get_current_version.outputs.version
+        run: |
+          # 打印日志，说明发现了新版本
+          echo "发现新版本: ${{ steps.get_latest_version.outputs.version }}，当前版本为: ${{ steps.get_current_version.outputs.version }}"
+          # 定义下载链接模板
+          DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${{ steps.get_latest_version.outputs.version }}/sing-box-${{ steps.get_latest_version.outputs.version }}-android-arm64.tar.gz"
+          # 打印下载链接
+          echo "下载链接: $DOWNLOAD_URL"
+          # 下载压缩包
+          curl -L -o sing-box.tar.gz "$DOWNLOAD_URL"
+          # 解压压缩包，只解压出 sing-box 二进制文件，并覆盖到指定目录
+          tar -xzf sing-box.tar.gz -C box/bin/ sing-box-${{ steps.get_latest_version.outputs.version }}-android-arm64/sing-box --strip-components=1
+          # 清理下载的压缩包
+          rm sing-box.tar.gz
+
+      # 步骤 5: 提交更新
+      - name: 提交更新后的核心
+        # 同样，只有在版本号不一致时才执行
+        if: steps.get_latest_version.outputs.version != steps.get_current_version.outputs.version
+        run: |
+          # 配置 Git 用户
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'github-actions@github.com'
+          # 添加所有变动到暂存区
+          git add .
+          # 创建一个新的提交
+          git commit -m "feat(core): 自动更新 sing-box 核心至 v${{ steps.get_latest_version.outputs.version }}"
+          # 推送提交到 simple 分支
+          git push origin simple
