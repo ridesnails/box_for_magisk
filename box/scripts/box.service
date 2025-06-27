@@ -177,6 +177,8 @@ prepare_singbox() {
   ${yq} '(.inbounds[] | select(.type == "tun") | .auto_route) |= true' -i --output-format=json "${sing_config}"
 
   # Format sing-box configuration
+  log Info "Saving config to ${box_run}/pre-format-run.json before formatting"
+  cp "${sing_config}" "${box_run}/pre-format-run.json"
   if ${bin_path} format -w -D "${box_dir}/${bin_name}" -C "${box_dir}/${bin_name}" > "${box_run}/${bin_name}.log" 2>&1; then
     # Set auto_route based on network_mode
     if [[ "${network_mode}" == @(mixed|tun) ]]; then
