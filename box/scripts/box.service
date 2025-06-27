@@ -256,6 +256,9 @@ prepare_singbox() {
         fi
       done
     fi
+
+    # Final fix for potential null rule_set issue from 'sing-box format'
+    sed -i 's/"rule_set": null/"rule_set": []/g' "${sing_config}"
   else
     log Error "$(<"${box_run}/${bin_name}.log")"
     log Error "Configuration failed. Please check the ${box_run}/${bin_name}.log file."
