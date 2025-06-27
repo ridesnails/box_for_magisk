@@ -410,6 +410,8 @@ box_run_bin() {
       ;;
     sing-box)
       prepare_singbox
+      log Info "Saving final config to ${box_run}/run.json for debugging"
+      cp "${sing_config}" "${box_run}/run.json"
       if ${bin_path} check -D "${box_dir}/${bin_name}" -C "${box_dir}/${bin_name}" > "${box_run}/${bin_name}.log" 2>&1; then
         nohup busybox setuidgid "${box_user_group}" "${bin_path}" run -D "${box_dir}/${bin_name}" -C "${box_dir}/${bin_name}" > "${bin_log}" 2>&1 &
         PID=$!
