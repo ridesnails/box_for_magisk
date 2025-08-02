@@ -33,7 +33,7 @@ jobs:
         run: |
           VERSION="${{ github.event.inputs.tag }}"
           DATE_NUM="${{ steps.get_version.outputs.date }}"
-          DATE_HUMAN=$(date +%d-%m-%y)
+          DATE_HUMAN=$(date +%d-%m-%Y)
           CHANGELOG="${{ github.event.inputs.changelog }}"
 
           # update.json
@@ -56,10 +56,10 @@ jobs:
             echo "" >> CHANGELOG.md
           fi
           {
-            echo "#### Changelog v$VERSION - $DATE_HUMAN"
+            echo "#### Changelog $VERSION - $DATE_HUMAN"
             echo "$CHANGELOG" | sed 's/^/- /'
             echo ""
-            cat CHANGELOG.md
+            # cat CHANGELOG.md
           } > CHANGELOG.tmp && mv CHANGELOG.tmp CHANGELOG.md
 
       # 4. Commit and push changes
