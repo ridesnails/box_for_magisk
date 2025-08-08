@@ -27,7 +27,7 @@ box_bin_alive() {
     log Error "please check ${bin_name}.log for more information."
     log Error "killing stale pid $PID"
     for bin in "${bin_list[@]}"; do
-      killall -15 "${bin}" >/dev/null 2>&1 || busybox pkill -15 "${bin}" >/dev/null 2>&1 
+      killall -15 "${bin}" >/dev/null || busybox pkill -15 "${bin}" >/dev/null 2>&1 
     done
     "${scripts_dir}/box.iptables" disable >/dev/null 2>&1
     [ -f "${box_pid}" ] && rm -f "${box_pid}"
@@ -389,14 +389,12 @@ box_run_bin() {
   case "${bin_name}" in
     hysteria)
       # sync port
-      sed -i -e "/tcpTProxy:/,/listen:/s/listen: :.*/listen: :${tproxy_port}/" "${box_dir}/${bin_name}/config.yaml"
-      sed -i -e "/udpTProxy:/,/listen:/s/listen: :.*/listen: :${tproxy_port}/" "${box_dir}/${bin_name}/config.yaml"
-      sed -i -e "/tcpRedirect:/,/listen:/s/listen: :.*/listen: :${redir_port}/" "${box_dir}/${bin_name}/config.yaml"
+      if [ -f "${hysteria_config}" ]; then
+        sed -i -e "/tcpTProxy:/,/listen:/s/listen: :.*/listen: :${tproxy_port}/" "${hysteria_config}"
+        sed -i -e "/udpTProxy:/,/listen:/s/listen: :.*/listen: :${tproxy_port}/" "${hysteria_config}"
+        sed -i -e "/tcpRedirect:/,/listen:/s/listen: :.*/listen: :${redir_port}/" "${hysteria_config}"
+      fi
 
-      # set network_mode variable value to "tproxy"
-      # if [[ "${network_mode}" != "tproxy" ]]; then
-        # sed -i 's/\(network_mode=\)\"[^\"]*\"/\1"tproxy"/g' ${settings}
-      # fi
       case "${network_mode}" in
         redirect|tproxy|enhance)
           # do nothing
@@ -406,10 +404,19 @@ box_run_bin() {
           ;;
       esac
 
-      nohup busybox setuidgid ${box_user_group} ${bin_path} -c ${box_dir}/${bin_name}/config.yaml > "${bin_log}" 2>&1 &
+      nohup busybox setuidgid "${box_user_group}" "${bin_path}" -c "${hysteria_config}" > "${bin_log}" 2>&1 &
       PID=$!
-      echo -n $PID > "${box_pid}"
+
       sleep 1
+
+      # Cek apakah proses benar-benar berjalan
+      if kill -0 "${PID}" 2>/dev/null; then
+        echo -n "${PID}" > "${box_pid}"
+      else
+        log Error "$(cat "${box_run}/${bin_name}.log")"
+        log Error "Configuration failed. Please check the log file: ${box_run}/${bin_name}.log"
+        exit 1
+      fi
       ;;
     sing-box)
       prepare_singbox
@@ -443,21 +450,18 @@ box_run_bin() {
         sed -i 's/\(network_mode=\)\"[^\"]*\"/\1"tproxy"/g' ${settings}
       fi
 
-      # sync port
-      ${box_dir}/bin/yq '(.inbounds[] | select(.protocol == "dokodemo-door") | .port) = '"${tproxy_port}"'' -i --output-format=yaml "${box_dir}/${bin_name}/config.yaml" >/dev/null 2>&1
-
-      ${box_dir}/bin/yq '(.inbounds[] | select(.protocol == "dokodemo-door") | select(.tag == "tproxy-in") | .port) = '"${tproxy_port}" -i --output-format=json "${box_dir}/${bin_name}/config.json" >/dev/null 2>&1
-
       # check configuration file
-      if [ ! -f "${box_dir}/${bin_name}/config.toml" ] && [ ! -f "${box_dir}/${bin_name}/config.json" ] && [ ! -f "${box_dir}/${bin_name}/config.yaml" ]; then
-        log Error "No configuration file found in ${box_dir}/${bin_name}/. Expected one of: config.toml, config.json, or config.yaml"
-        if [ -f "${box_pid}" ]; then
-          rm -f "${box_pid}"
-          log Info "PID file removed: ${box_pid}"
-        fi
+      if [ ! -f "${xray_config}" ]; then
+        log Error "No configuration file found in ${xray_config}"
         exit 1
       else
-        log Info "Configuration file located in ${box_dir}/${bin_name}/ (one of: .toml, .json, or .yaml)"
+        # sync port
+        if [[ "${xray_config}" == *.yaml ]]; then
+          ${box_dir}/bin/yq '(.inbounds[] | select(.protocol == "dokodemo-door") | .port) = '"${tproxy_port}"'' -i --output-format=yaml "${xray_config}" >/dev/null 2>&1
+        elif [[ "${xray_config}" == *.json ]]; then
+          ${box_dir}/bin/yq '(.inbounds[] | select(.protocol == "dokodemo-door") | select(.tag == "tproxy-in") | .port) = '"${tproxy_port}" -i --output-format=json "${xray_config}" >/dev/null 2>&1
+        fi
+        log Info "Configuration file located in ${xray_config}"
       fi
 
       # run xray
@@ -479,21 +483,18 @@ box_run_bin() {
         sed -i 's/\(network_mode=\)\"[^\"]*\"/\1"tproxy"/g' ${settings}
       fi
 
-      # sync port
-      ${box_dir}/bin/yq '(.inbounds[] | select(.protocol == "dokodemo-door") | .port) = '"${tproxy_port}"'' -i --output-format=yaml "${box_dir}/${bin_name}/config.yaml" >/dev/null 2>&1
-
-      ${box_dir}/bin/yq '(.inbounds[] | select(.protocol == "dokodemo-door") | select(.tag == "tproxy-in") | .port) = '"${tproxy_port}" -i --output-format=json "${box_dir}/${bin_name}/config.json" >/dev/null 2>&1
-
       # check configuration file
-      if [ ! -f "${box_dir}/${bin_name}/config.toml" ] && [ ! -f "${box_dir}/${bin_name}/config.json" ] && [ ! -f "${box_dir}/${bin_name}/config.yaml" ]; then
-        log Error "No configuration file found in ${box_dir}/${bin_name}/. Expected one of: config.toml, config.json, or config.yaml"
-        if [ -f "${box_pid}" ]; then
-          rm -f "${box_pid}"
-          log Info "PID file removed: ${box_pid}"
-        fi
+      if [ ! -f "${v2fly_config}" ]; then
+        log Error "No configuration file found in ${v2fly_config}"
         exit 1
       else
-        log Info "Configuration file located in ${box_dir}/${bin_name}/ (one of: .toml, .json, or .yaml)"
+        # sync port
+        if [[ "${v2fly_config}" == *.yaml ]]; then
+          ${box_dir}/bin/yq '(.inbounds[] | select(.protocol == "dokodemo-door") | .port) = '"${tproxy_port}"'' -i --output-format=yaml "${v2fly_config}" >/dev/null 2>&1
+        elif [[ "${v2fly_config}" == *.json ]]; then
+          ${box_dir}/bin/yq '(.inbounds[] | select(.protocol == "dokodemo-door") | select(.tag == "tproxy-in") | .port) = '"${tproxy_port}" -i --output-format=json "${v2fly_config}" >/dev/null 2>&1
+        fi
+        log Info "Configuration file located in ${v2fly_config}"
       fi
 
       # run v2ray
@@ -607,7 +608,7 @@ box_bin_status() {
 
   # Save the process ID to the pid file
   if [ -n "$PID" ]; then
-    sed -Ei "s/^description=(\[.*][[:space:]]*)?/description=[ $current_time | 🍀 $bin_name service is running!!! ] /g" "$PROPFILE"
+    sed -Ei "s/^description=(\[.*][[:space:]]*)?/description=[ $current_time | ⭕ $bin_name service is running!!! ] /g" "$PROPFILE"
     echo -n "$PID" > "${box_pid}"
   fi
 }
@@ -615,7 +616,7 @@ box_bin_status() {
 start_box() {
   # Clear the log file and add the timestamp and delimiter
   # cd /data/adb/box/bin; chmod 755 *
-  sed -Ei "s/^description=(\[.*][[:space:]]*)?/description=[ $current_time | 🙂‍↔️ Module is working! but no service is running ] /g" "$PROPFILE"
+  sed -Ei "s/^description=(\[.*][[:space:]]*)?/description=[ $current_time | ⚠️ Module is working! but no service is running ] /g" "$PROPFILE"
 
   echo -n "" > "${box_log}"
   box_version=$(busybox awk '!/^ *#/ && /version=/ { print $0 }' "/data/adb/modules/box_for_root/module.prop" 2>/dev/null)
@@ -770,7 +771,7 @@ stop_box() {
     force_stop
   fi
 
-  sed -Ei "s/^description=(\[.*][[:space:]]*)?/description=[ $current_time | 😱 $bin_name shutting down, service is stopped !!! ] /g" "$PROPFILE"
+  sed -Ei "s/^description=(\[.*][[:space:]]*)?/description=[ $current_time | ❌ $bin_name shutting down, service is stopped !!! ] /g" "$PROPFILE"
 }
 
 stop_cron() {
