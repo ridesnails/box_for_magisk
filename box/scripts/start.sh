@@ -11,14 +11,14 @@ busybox="/data/adb/magisk/busybox"
 
 refresh_box() {
   if [ -f "/data/adb/box/run/box.pid" ]; then
-    "${scripts_dir}/box.service" stop >> "/dev/null" 2>&1
-    "${scripts_dir}/box.iptables" disable >> "/dev/null" 2>&1
+    "${scripts_dir}/box.service" stop > "/dev/null" 2>&1
+    "${scripts_dir}/box.iptables" disable > "/dev/null" 2>&1
   fi
 }
 
 start_service() {
   if [ ! -f "${moddir}/disable" ]; then
-    "${scripts_dir}/box.service" start >> "/dev/null" 2>&1
+    "${scripts_dir}/box.service" start > "/dev/null" 2>&1
   fi
 }
 
@@ -32,7 +32,7 @@ enable_iptables() {
   done
 
   if [ -n "$PID" ]; then
-    "${scripts_dir}/box.iptables" enable >> "/dev/null" 2>&1
+    "${scripts_dir}/box.iptables" enable > "/dev/null" 2>&1
   fi
 }
 

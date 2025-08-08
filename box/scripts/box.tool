@@ -13,7 +13,7 @@ mihomo_stable="enable"
 singbox_stable="enable"
 
 rev1="busybox wget --no-check-certificate -qO-"
-if which curl > /dev/null 2>&1; then
+if which curl >/dev/null; then
   rev1="curl --insecure -sL"
 fi
 
@@ -30,7 +30,7 @@ upfile() {
     update_url="${url_ghproxy}/${update_url}"
   fi
   # request
-  if which curl > /dev/null 2>&1; then
+  if which curl >/dev/null; then
     # curl="$(which curl || echo /data/adb/box/bin/curl)"
     request="curl"
     request+=" -L"
@@ -128,7 +128,7 @@ check() {
 # reload base config
 reload() {
   curl_command="curl"
-  if ! command -v curl >/dev/null 2>&1; then
+  if ! command -v curl >/dev/null; then
     if [ ! -e "${bin_dir}/curl" ]; then
       log Debug "$bin_dir/curl file not found, unable to reload configuration"
       log Debug "start to download from github"
@@ -303,7 +303,7 @@ upsubs() {
                 ${yq} -i '{"proxies": .}' "${clash_provide_config}"
 
                 if [ "${custom_rules_subs}" = "true" ]; then
-                  if ${yq} '.rules' "${update_file_name}" >/dev/null 2>&1; then
+                  if ${yq} '.rules' "${update_file_name}" >/dev/null; then
 
                     ${yq} '.rules' "${update_file_name}" > "${clash_provide_rules}"
                     ${yq} -i '{"rules": .}' "${clash_provide_rules}"
@@ -475,7 +475,7 @@ xkernel() {
   case "${bin_name}" in
     "clash")
       gunzip_command="gunzip"
-      if ! command -v gunzip >/dev/null 2>&1; then
+      if ! command -v gunzip >/dev/null; then
         gunzip_command="busybox gunzip"
       fi
 
@@ -494,7 +494,7 @@ xkernel() {
       ;;
     "sing-box")
       tar_command="tar"
-      if ! command -v tar >/dev/null 2>&1; then
+      if ! command -v tar >/dev/null; then
         tar_command="busybox tar"
       fi
       if ${tar_command} -xf "${box_dir}/${file_kernel}.tar.gz" -C "${bin_dir}" >&2; then
@@ -517,7 +517,7 @@ xkernel() {
         bin="v2ray"
       fi
       unzip_command="unzip"
-      if ! command -v unzip >/dev/null 2>&1; then
+      if ! command -v unzip >/dev/null; then
         unzip_command="busybox unzip"
       fi
 
@@ -568,7 +568,7 @@ upxui() {
     dir_name="yacd-gh-pages"
     log Debug "Download ${url}"
 
-    if which curl > /dev/null 2>&1; then
+    if which curl >/dev/null; then
       rev2="curl -L --insecure ${url} -o"
     else
       rev2="busybox wget --no-check-certificate ${url} -O"
@@ -581,7 +581,7 @@ upxui() {
       else
         rm -rf "${box_dir}/${xdashboard}/"*
       fi
-      if command -v unzip >/dev/null 2>&1; then
+      if command -v unzip >/dev/null; then
         unzip_command="unzip"
       else
         unzip_command="busybox unzip"
@@ -611,7 +611,7 @@ cgroup_blkio() {
   fi
 
   local PID=$(<"$pid_file" 2>/dev/null)
-  if [ -z "$PID" ] || ! kill -0 "$PID" 2>/dev/null; then
+  if [ -z "$PID" ] || ! kill -0 "$PID" >/dev/null; then
     log Warning "Invalid or dead PID: $PID"
     return 1
   fi
@@ -620,7 +620,7 @@ cgroup_blkio() {
   if [ -z "$blkio_path" ]; then
     blkio_path=$(mount | busybox awk '/blkio/ {print $3}' | head -1)
     if [ -z "$blkio_path" ] || [ ! -d "$blkio_path" ]; then
-      log Warning "blkio_path not found"
+      log Warning "blkio path not found"
       return 1
     fi
   fi
@@ -679,7 +679,7 @@ cgroup_memcg() {
 
   local PID
   PID=$(<"$pid_file" 2>/dev/null)
-  if [ -z "$PID" ] || ! kill -0 "$PID" 2>/dev/null; then
+  if [ -z "$PID" ] || ! kill -0 "$PID" >/dev/null; then
     log Warning "Invalid or dead PID: $PID"
     return 1
   fi
@@ -718,7 +718,7 @@ cgroup_cpuset() {
 
   local PID
   PID=$(<"${pid_file}" 2>/dev/null)
-  if [ -z "$PID" ] || ! kill -0 "$PID" 2>/dev/null; then
+  if [ -z "$PID" ] || ! kill -0 "$PID" >/dev/null; then
     log Warning "PID $PID from ${pid_file} is not valid or not running"
     return 1
   fi
@@ -738,13 +738,15 @@ cgroup_cpuset() {
   if [ -z "${cpuset_path}" ]; then
     cpuset_path=$(mount | grep cgroup | busybox awk '/cpuset/{print $3}' | head -1)
     if [ -z "${cpuset_path}" ] || [ ! -d "${cpuset_path}" ]; then
-      log Warning "cpuset_path not found"
+      log Warning "cpuset path not found"
       return 1
     fi
   fi
 
-  local cpuset_target="${cpuset_path}/top-app"
+  local cpuset_target="${cpuset_path}/foreground"
   if [ ! -d "${cpuset_target}" ]; then
+    cpuset_target="${cpuset_path}/top-app"
+  elif [ ! -d "${cpuset_target}" ]; then
     cpuset_target="${cpuset_path}/apps"
     [ ! -d "${cpuset_target}" ] && log Warning "cpuset target not found" && return 1
   fi
